@@ -24,6 +24,7 @@ namespace CornerTodo
             Width = 430;
             Height = 475;
             AutoExpand = true;
+            Appearance = AppearanceSettings.CreateLight();
         }
 
         public double? Left { get; set; }
@@ -33,6 +34,7 @@ namespace CornerTodo
         public bool Collapsed { get; set; }
         public bool CompletedCollapsed { get; set; }
         public bool AutoExpand { get; set; }
+        public AppearanceSettings Appearance { get; set; }
     }
 
     public sealed class TodoState

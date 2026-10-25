@@ -77,6 +77,8 @@ $references = @(
     (Join-Path $frameworkRoot 'System.Core.dll'),
     (Join-Path $frameworkRoot 'System.Web.Extensions.dll'),
     (Join-Path $frameworkRoot 'System.Xaml.dll'),
+    (Join-Path $frameworkRoot 'System.Windows.Forms.dll'),
+    (Join-Path $frameworkRoot 'System.Drawing.dll'),
     (Join-Path $frameworkRoot 'WPF\WindowsBase.dll'),
     (Join-Path $frameworkRoot 'WPF\PresentationCore.dll'),
     (Join-Path $frameworkRoot 'WPF\PresentationFramework.dll')
@@ -113,7 +115,7 @@ Copy-Item -LiteralPath (Join-Path $projectDir 'CornerTodo.exe.config') -Destinat
 Write-Output ('Built: ' + $executablePath)
 
 if ($Test) {
-    foreach ($testName in @('Run-StoreTests.ps1', 'Run-GrowthLayoutTests.ps1', 'Run-OffscreenUiTests.ps1')) {
+    foreach ($testName in @('Run-StoreTests.ps1', 'Run-GrowthLayoutTests.ps1', 'Run-OffscreenUiTests.ps1', 'Run-AppearanceUiTests.ps1')) {
         $testScript = Join-Path (Join-Path $projectDir 'tests') $testName
         if (-not (Test-Path -LiteralPath $testScript)) {
             throw ('The requested test script was not found: ' + $testScript)

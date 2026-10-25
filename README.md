@@ -1,14 +1,15 @@
 # CornerTodo · 角落待办
 
-放在 Windows 桌面右上角的本地待办工具。用一句话记录要做的事，选择截止日期，完成后勾选归档。浅色半透明面板保留桌面观感，临近截止时会逐渐扩大，提醒你关注尚未完成的事项。
+放在 Windows 桌面右上角的本地待办工具。用一句话记录要做的事，选择截止日期，完成后勾选归档。可定制颜色与透明度的面板保留桌面观感，临近截止时会逐渐扩大，提醒你关注尚未完成的事项。
 
 ![CornerTodo 常态面板，图中内容为示例事项](docs/images/normal.png)
 
-本文以首个拟发布版本 **v1.0.0** 为例。可下载版本以本仓库的 **Releases** 页面为准。
+本文以拟发布版本 **v1.1.0** 为例。可下载版本以本仓库的 **Releases** 页面为准。
 
 ## 功能
 
 - 无边框、半透明的桌面面板，默认位于右上角，其他软件可覆盖它。
+- 外观设置：调整背景透明度、背景色和主要／次要文字颜色，提供浅色、深色和原版预设，实时预览后选择保存或取消。
 - 输入完整事项，单独选择截止日期，具体时刻可选；句子中的人物和时间无需拆成字段，截止时间由你手动选择。
 - 「未完成／已完成」两种状态。勾选后移入已完成区域并划线，取消勾选可恢复。
 - 双击或右键编辑，右键删除并确认；未完成按截止时间排序，已完成按完成时间倒序。
@@ -18,13 +19,23 @@
 
 ## 下载与运行
 
-在仓库的 **Releases** 中下载 `CornerTodo-v1.0.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
+在仓库的 **Releases** 中下载 `CornerTodo-v1.1.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
 
-`CornerTodo-v1.0.0-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
+`CornerTodo-v1.1.0-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
 
 系统目标为 **Windows 10 / 11，.NET Framework 4.7.2 或更新版本**。应用使用 C# / WPF 与 Windows 自带的框架库，没有第三方运行时依赖。桌面层显示会受到 Explorer、其他桌面工具、多显示器和缩放配置的影响，尚未保证所有环境组合的兼容性；无法连接桌面层时会提示并以普通窗口显示。
 
 便携版尚未进行代码签名，Windows 或 SmartScreen 可能显示「未知发布者」等信任提示。请根据下载来源、源码和文件摘要决定是否运行，并保持系统防护开启。`SHA256SUMS.txt` 可用于核对文件是否一致，摘要本身不构成安全保证。
+
+## 外观设置（v1.1.0）
+
+从面板「⋯」菜单打开「外观设置」。背景透明度可在 0%～100% 之间调节：0% 为实色背景，100% 为全透明背景。该设置只影响背景，主要与次要文字不会跟着变淡。
+
+可分别选择背景色、主要文字色与次要文字色，使用颜色选择器或填写 `#RRGGBB` 色值；也可选择浅色、深色或恢复原版外观。调整会实时预览，点击「保存」才会写入本地设置；取消或关闭设置窗口会恢复已保存的外观。预设选择同样遵循预览与保存规则。
+
+紧急与逾期提示保留状态配色。即使背景全透明，菜单与收起按钮仍有清晰底色；如果配色不易辨认，可在「⋯」菜单选择「恢复清晰浅色」，直接恢复并保存默认外观。
+
+新数据默认使用清晰浅色；旧版数据缺少外观设置时自动沿用原版外观。外观设置与待办数据一起保存在本地，修改外观不会改变事项、截止时间或保存的常态尺寸。
 
 ## 截止时间与自动扩大
 
@@ -58,13 +69,14 @@ powershell -NoProfile -File .\Build.ps1
 powershell -NoProfile -File .\Build.ps1 -Test
 ```
 
-三类测试也可单独运行：
+四类测试也可单独运行：
 
 | 测试 | 命令 | 范围 |
 | --- | --- | --- |
 | 数据与截止规则 | `powershell -NoProfile -File .\tests\Run-StoreTests.ps1` | 保存、恢复、排序、截止边界、紧迫程度与设置兼容 |
 | 增长布局 | `powershell -NoProfile -File .\tests\Run-GrowthLayoutTests.ps1` | 尺寸上限、锚点、屏幕边界、DPI 与异常输入 |
 | WPF 离屏界面 | `powershell -NoProfile -File .\tests\Run-OffscreenUiTests.ps1` | 示例界面布局与渲染，结果写入 `tests\visual-qa` |
+| 外观设置界面 | `powershell -NoProfile -File .\tests\Run-AppearanceUiTests.ps1` | 背景透明度、主题预览／保存／回滚、编辑器交互，结果写入 `tests\appearance-qa` |
 
 离屏测试覆盖界面渲染，实际桌面显示仍需在目标 Windows 环境中检查。
 
@@ -82,19 +94,19 @@ powershell -NoProfile -File .\Build.ps1 -Test
 
 ## 打包与发布
 
-维护者可运行下面的命令。脚本会从源码白名单建立干净副本，在副本中构建并运行三类测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
+维护者可运行下面的命令。脚本会从源码白名单建立干净副本，在副本中构建并运行四类测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.0.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.1.0
 ```
 
 产物位于 `release`：
 
-- `CornerTodo-v1.0.0-source.zip`
-- `CornerTodo-v1.0.0-windows-portable.zip`
+- `CornerTodo-v1.1.0-source.zip`
+- `CornerTodo-v1.1.0-windows-portable.zip`
 - `SHA256SUMS.txt`
 
-`release\CornerTodo-v1.0.0-source` 保留干净的源码展开目录，可直接将其中的内容上传到 GitHub。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
+`release\CornerTodo-v1.1.0-source` 保留干净的源码展开目录，可直接将其中的内容上传到 GitHub。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
 
 ## 许可证
 

@@ -158,6 +158,7 @@ namespace CornerTodo
                 });
             }
             WidgetSettings settings = state.Settings;
+            AppearanceSettings appearance = AppearanceSettings.Normalize(settings.Appearance);
             return new Dictionary<string, object>
             {
                 { "Version", state.Version }, { "Items", items },
@@ -167,7 +168,15 @@ namespace CornerTodo
                         { "Width", settings.Width }, { "Height", settings.Height },
                         { "Collapsed", settings.Collapsed },
                         { "CompletedCollapsed", settings.CompletedCollapsed },
-                        { "AutoExpand", settings.AutoExpand }
+                        { "AutoExpand", settings.AutoExpand },
+                        { "Appearance", new Dictionary<string, object>
+                            {
+                                { "BackgroundTransparency", appearance.BackgroundTransparency },
+                                { "BackgroundColor", appearance.BackgroundColor },
+                                { "PrimaryTextColor", appearance.PrimaryTextColor },
+                                { "SecondaryTextColor", appearance.SecondaryTextColor }
+                            }
+                        }
                     }
                 }
             };
@@ -176,6 +185,9 @@ namespace CornerTodo
         private static TodoState FromJson(IDictionary<string, object> root)
         {
             TodoState state = new TodoState();
+            // An existing document without appearance fields predates appearance
+            // settings. Keep its previous white, highly transparent background.
+            state.Settings.Appearance = AppearanceSettings.CreateOriginal();
             object value;
             if (root.TryGetValue("Version", out value))
             {
@@ -214,8 +226,25 @@ namespace CornerTodo
                 state.Settings.Collapsed = Boolean(settings, "Collapsed", false);
                 state.Settings.CompletedCollapsed = Boolean(settings, "CompletedCollapsed", false);
                 state.Settings.AutoExpand = Boolean(settings, "AutoExpand", true);
+                if (settings.TryGetValue("Appearance", out value))
+                    state.Settings.Appearance = ReadAppearance(value);
             }
             return state;
+        }
+
+        private static AppearanceSettings ReadAppearance(object value)
+        {
+            IDictionary<string, object> fields = value as IDictionary<string, object>;
+            if (fields == null) return AppearanceSettings.CreateLight();
+            AppearanceSettings appearance = AppearanceSettings.CreateLight();
+            object field;
+            if (fields.TryGetValue("BackgroundTransparency", out field)
+                && (field is int || field is long || field is decimal || field is double))
+                appearance.BackgroundTransparency = Convert.ToDouble(field, CultureInfo.InvariantCulture);
+            if (fields.TryGetValue("BackgroundColor", out field)) appearance.BackgroundColor = field as string;
+            if (fields.TryGetValue("PrimaryTextColor", out field)) appearance.PrimaryTextColor = field as string;
+            if (fields.TryGetValue("SecondaryTextColor", out field)) appearance.SecondaryTextColor = field as string;
+            return AppearanceSettings.Normalize(appearance);
         }
 
         private static void Validate(TodoState state)

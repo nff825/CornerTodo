@@ -23,9 +23,12 @@ namespace CornerTodo
         private readonly ScrollViewer scroll;
         private readonly StackPanel list;
         private readonly TextBlock dateText;
+        private readonly TextBlock title;
         private readonly TextBlock attentionText;
         private readonly TextBlock status;
         private readonly Button collapse;
+        private readonly Button more;
+        private readonly Border toolbarSurface;
         private readonly Button add;
         private readonly Thumb grip;
         private readonly DispatcherTimer saveTimer;
@@ -48,6 +51,8 @@ namespace CornerTodo
         private bool dialogOpen;
         private bool deferredRender;
         private bool resumeQueued;
+        private AppearanceSettings appearancePreview;
+        private PanelPalette palette;
         private string dateStamp;
         private bool attachScheduled;
         public bool HostLost { get; set; }
@@ -62,7 +67,7 @@ namespace CornerTodo
             baseWidth = Width; baseHeight = Height;
             FontFamily = new FontFamily("Microsoft YaHei UI"); Foreground = Theme.Ink;
             UseLayoutRounding = true; SnapsToDevicePixels = true;
-            surface = new Border { Background = Theme.Brush("#20FFFFFF"), CornerRadius = new CornerRadius(12), Padding = new Thickness(19, 15, 17, 12) };
+            surface = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(19, 15, 17, 12) };
             Content = surface;
             root = new Grid(); surface.Child = root;
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -73,17 +78,19 @@ namespace CornerTodo
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var titles = new StackPanel();
-            var title = Theme.Text("待办清单", 25, Theme.Ink); title.FontWeight = FontWeights.Bold;
+            title = Theme.Text("待办清单", 25, Theme.Ink); title.FontWeight = FontWeights.Bold;
             dateText = Theme.Text("", 12, Theme.Muted); dateText.Margin = new Thickness(0, 4, 0, 0);
             attentionText = Theme.Text("", 12, Theme.Muted); attentionText.Margin = new Thickness(0, 7, 0, 0);
             titles.Children.Add(title); titles.Children.Add(dateText); titles.Children.Add(attentionText); header.Children.Add(titles);
             var toolbar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
             collapse = new Button { Content = "⌃", FontSize = 21, Style = Theme.FlatButton(), Width = 34, Height = 32, ToolTip = "收起面板" };
             collapse.Click += delegate { TogglePanel(); };
-            var more = new Button { Content = "⋯", FontSize = 22, Style = Theme.FlatButton(), Width = 34, Height = 32, ToolTip = "更多" };
+            more = new Button { Content = "⋯", FontSize = 22, Style = Theme.FlatButton(), Width = 34, Height = 32, ToolTip = "更多" };
             AutomationProperties.SetName(more, "更多操作");
             more.Click += delegate { var menu = BuildMenu(); menu.PlacementTarget = more; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true; };
-            toolbar.Children.Add(collapse); toolbar.Children.Add(more); Grid.SetColumn(toolbar, 1); header.Children.Add(toolbar);
+            toolbar.Children.Add(collapse); toolbar.Children.Add(more);
+            toolbarSurface = new Border { Child = toolbar, CornerRadius = new CornerRadius(6), VerticalAlignment = VerticalAlignment.Top };
+            Grid.SetColumn(toolbarSurface, 1); header.Children.Add(toolbarSurface);
             header.MouseLeftButtonDown += HeaderDown; header.MouseMove += HeaderMove; header.MouseLeftButtonUp += HeaderUp;
             header.LostMouseCapture += delegate { moving = false; ResumeAttention(); };
             root.Children.Add(header);
@@ -130,6 +137,7 @@ namespace CornerTodo
             PreviewKeyDown += delegate(object sender, KeyEventArgs e) {
                 if (e.Key == Key.N && (Keyboard.Modifiers & ModifierKeys.Control) != 0) { Edit(null); e.Handled = true; }
             };
+            surface.ContextMenu = BuildMenu();
             Render();
         }
 
@@ -173,23 +181,24 @@ namespace CornerTodo
         {
             DateTime now = DateTime.Now;
             dateStamp = now.ToString("yyyyMMddHHmm"); deferredRender = false;
+            ApplyPanelPalette();
             UpdateHeader(now);
             double previousScroll = scroll.VerticalOffset;
             list.Children.Clear();
             var pending = TodoRules.Pending(state).ToList();
             var completed = TodoRules.Completed(state).ToList();
-            var heading = Theme.Text("未完成  " + pending.Count, 14, Theme.Ink); heading.FontWeight = FontWeights.SemiBold;
+            var heading = Theme.Text("未完成  " + pending.Count, 14, palette.Ink); heading.FontWeight = FontWeights.SemiBold;
             heading.Margin = new Thickness(0, 3, 0, 7); list.Children.Add(heading);
             if (pending.Count == 0)
             {
-                var empty = Theme.Text(state.Items.Count == 0 ? "把接下来要做的事，记在这里。" : "当前待办都已完成。", 14, Theme.Muted);
+                var empty = Theme.Text(state.Items.Count == 0 ? "把接下来要做的事，记在这里。" : "当前待办都已完成。", 14, palette.Muted);
                 empty.Margin = new Thickness(0, 15, 0, 22); list.Children.Add(empty);
             }
             foreach (var item in pending) list.Children.Add(TaskRow(item, now));
-            list.Children.Add(new Border { Height = 1, Background = Theme.Brush("#38FFFFFF"), Margin = new Thickness(0, 14, 0, 11) });
+            list.Children.Add(new Border { Height = 1, Background = palette.Separator, Margin = new Thickness(0, 14, 0, 11) });
             var completedToggle = new Button { Content = (state.Settings.CompletedCollapsed ? "›  " : "⌄  ") + "已完成  " + completed.Count,
-                Style = Theme.FlatButton(), FontSize = 14, FontWeight = FontWeights.SemiBold,
-                Foreground = Theme.Muted, HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(0, 3, 10, 7) };
+                Style = palette.ButtonStyle, FontSize = 14, FontWeight = FontWeights.SemiBold,
+                Foreground = palette.Muted, HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(0, 3, 10, 7) };
             AutomationProperties.SetName(completedToggle, state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成");
             completedToggle.Click += delegate { var next = Clone(); next.Settings.CompletedCollapsed = !next.Settings.CompletedCollapsed; Commit(next); };
             list.Children.Add(completedToggle);
@@ -198,7 +207,7 @@ namespace CornerTodo
                 foreach (var item in completed) list.Children.Add(TaskRow(item, now));
                 if (completed.Count == 0)
                 {
-                    var empty = Theme.Text("完成的事项会保留在这里", 12, Theme.Muted); empty.Opacity = 0.8; empty.Margin = new Thickness(0, 5, 0, 10); list.Children.Add(empty);
+                    var empty = Theme.Text("完成的事项会保留在这里", 12, palette.Muted); empty.Margin = new Thickness(0, 5, 0, 10); list.Children.Add(empty);
                 }
             }
             ApplyCollapsed();
@@ -211,7 +220,7 @@ namespace CornerTodo
             var row = new Grid { Margin = new Thickness(0, 3, 0, 7), Background = Brushes.Transparent, Tag = item.Id };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var check = new CheckBox { Style = Theme.CircleCheck(), IsChecked = item.IsCompleted, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 0, 0) };
+            var check = new CheckBox { Style = palette.CheckStyle, IsChecked = item.IsCompleted, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 0, 0) };
             AutomationProperties.SetName(check, (item.IsCompleted ? "恢复未完成：" : "完成：") + item.Text);
             check.Click += delegate {
                 var next = Clone(); var changed = next.Items.First(t => t.Id == item.Id);
@@ -222,12 +231,12 @@ namespace CornerTodo
             var textArea = new StackPanel { Margin = new Thickness(0, 2, 5, 0) };
             bool overdue = TodoRules.IsOverdue(item, now);
             bool urgent = TodoRules.IsUrgent(item, now);
-            var text = Theme.Text(item.Text, overdue ? 21 : urgent ? 19 : 15, item.IsCompleted ? Theme.Muted : Theme.Ink);
+            var text = Theme.Text(item.Text, overdue ? 21 : urgent ? 19 : 15, item.IsCompleted ? palette.Muted : palette.Ink);
             if (overdue || urgent) text.FontWeight = FontWeights.SemiBold;
-            if (item.IsCompleted) { text.TextDecorations = TextDecorations.Strikethrough; text.Opacity = 0.76; }
+            if (item.IsCompleted) text.TextDecorations = TextDecorations.Strikethrough;
             textArea.Children.Add(text);
-            var due = Theme.Text(TodoRules.FormatAttention(item, now), overdue || urgent ? 13 : 12, overdue ? Theme.Warning : urgent ? Theme.Urgent : Theme.Muted);
-            due.Margin = new Thickness(0, 4, 0, 0); if (item.IsCompleted) due.Opacity = 0.7;
+            var due = Theme.Text(TodoRules.FormatAttention(item, now), overdue || urgent ? 13 : 12, overdue ? palette.Warning : urgent ? palette.Urgent : palette.Muted);
+            due.Margin = new Thickness(0, 4, 0, 0);
             textArea.Children.Add(due); Grid.SetColumn(textArea, 1); row.Children.Add(textArea);
             DateTime localDue = item.DueDate.Kind == DateTimeKind.Utc ? item.DueDate.ToLocalTime() : item.DueDate;
             row.ToolTip = item.Text + "\n截止：" + localDue.ToString(item.HasTime ? "yyyy年M月d日 HH:mm" : "yyyy年M月d日");
@@ -244,11 +253,20 @@ namespace CornerTodo
         private ContextMenu BuildMenu()
         {
             var menu = new ContextMenu();
+            menu.Opened += delegate {
+                foreach (var menuItem in menu.Items.OfType<MenuItem>()) {
+                    if (Object.Equals(menuItem.Tag, "auto-expand")) menuItem.IsChecked = state.Settings.AutoExpand;
+                    if (Object.Equals(menuItem.Tag, "completed-toggle")) menuItem.Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成";
+                }
+            };
             var create = new MenuItem { Header = "添加待办" }; create.Click += delegate { Edit(null); }; menu.Items.Add(create);
-            var showCompleted = new MenuItem { Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成" };
+            var showCompleted = new MenuItem { Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成", Tag = "completed-toggle" };
             showCompleted.Click += delegate { var next = Clone(); next.Settings.CompletedCollapsed = !next.Settings.CompletedCollapsed; Commit(next); }; menu.Items.Add(showCompleted);
             menu.Items.Add(new Separator());
-            var automatic = new MenuItem { Header = "随截止时间扩大", IsCheckable = true, IsChecked = state.Settings.AutoExpand };
+            var appearance = new MenuItem { Header = "外观设置…" }; appearance.Click += delegate { EditAppearance(); }; menu.Items.Add(appearance);
+            var readable = new MenuItem { Header = "恢复清晰浅色" }; readable.Click += delegate { TrySaveAppearance(AppearanceSettings.CreateLight()); }; menu.Items.Add(readable);
+            menu.Items.Add(new Separator());
+            var automatic = new MenuItem { Header = "随截止时间扩大", IsCheckable = true, IsChecked = state.Settings.AutoExpand, Tag = "auto-expand" };
             automatic.Click += delegate {
                 var next = Clone(); next.Settings.AutoExpand = automatic.IsChecked;
                 if (Commit(next)) UpdateExpansion(true, true);
@@ -284,6 +302,70 @@ namespace CornerTodo
             finally { Program.EditorOpen = false; ResumeAttention(); }
         }
 
+        private void EditAppearance()
+        {
+            if (Program.EditorOpen) return;
+            Program.EditorOpen = true; StopAnimation();
+            try {
+                var editor = new AppearanceEditor(state.Settings.Appearance, PreviewAppearance, TrySaveAppearance);
+                Rect area = DesktopHost.WorkArea(this);
+                editor.WindowStartupLocation = WindowStartupLocation.Manual;
+                editor.MinWidth = Math.Min(editor.MinWidth, Math.Max(1, area.Width - 24));
+                editor.MinHeight = Math.Min(editor.MinHeight, Math.Max(1, area.Height - 24));
+                editor.MaxWidth = Math.Max(editor.MinWidth, area.Width - 24);
+                editor.MaxHeight = Math.Max(editor.MinHeight, area.Height - 24);
+                editor.Width = Math.Min(editor.Width, editor.MaxWidth);
+                editor.Height = Math.Min(editor.Height, editor.MaxHeight);
+                editor.Left = Math.Max(area.Left + 12, area.Right - editor.Width - 26);
+                editor.Top = Math.Max(area.Top + 12, Math.Min(DesktopHost.GetBounds(this).Top + 35, area.Bottom - editor.Height - 12));
+                editor.ShowDialog();
+            }
+            finally {
+                CancelAppearancePreview();
+                Program.EditorOpen = false; ResumeAttention();
+            }
+        }
+
+        internal void PreviewAppearance(AppearanceSettings appearance)
+        {
+            appearancePreview = AppearanceSettings.Normalize(appearance);
+            Render();
+        }
+
+        internal void CancelAppearancePreview()
+        {
+            appearancePreview = null;
+            Render();
+        }
+
+        internal bool TrySaveAppearance(AppearanceSettings appearance)
+        {
+            var next = Clone(); next.Settings.Appearance = AppearanceSettings.Normalize(appearance);
+            try {
+                if (!preview) store.Save(next);
+                state = next; appearancePreview = null;
+                status.Visibility = Visibility.Collapsed; Render();
+                return true;
+            }
+            catch (Exception ex) {
+                appearancePreview = null; Render();
+                ShowStatus("外观未保存，已恢复原来的外观。" + ex.Message);
+                return false;
+            }
+        }
+
+        private void ApplyPanelPalette()
+        {
+            palette = new PanelPalette(appearancePreview ?? state.Settings.Appearance);
+            surface.Background = palette.Background;
+            Foreground = title.Foreground = palette.Ink;
+            dateText.Foreground = palette.Muted;
+            status.Foreground = palette.Warning;
+            collapse.Style = more.Style = add.Style = palette.ButtonStyle;
+            toolbarSurface.Background = palette.ToolbarBackground;
+            grip.Template = palette.ResizeTemplate;
+        }
+
         private void Delete(TodoItem item)
         {
             string description = item.Text.Length > 100 ? item.Text.Substring(0, 100) + "…" : item.Text;
@@ -294,7 +376,8 @@ namespace CornerTodo
         private TodoState Clone()
         {
             return new TodoState { Version = state.Version, Settings = new WidgetSettings { Left = state.Settings.Left, Top = state.Settings.Top,
-                Width = state.Settings.Width, Height = state.Settings.Height, Collapsed = state.Settings.Collapsed, CompletedCollapsed = state.Settings.CompletedCollapsed, AutoExpand = state.Settings.AutoExpand },
+                Width = state.Settings.Width, Height = state.Settings.Height, Collapsed = state.Settings.Collapsed, CompletedCollapsed = state.Settings.CompletedCollapsed, AutoExpand = state.Settings.AutoExpand,
+                Appearance = AppearanceSettings.Normalize(state.Settings.Appearance) },
                 Items = state.Items.Select(t => new TodoItem { Id = t.Id, Text = t.Text, IsCompleted = t.IsCompleted, CreatedAt = t.CreatedAt,
                     CompletedAt = t.CompletedAt, DueDate = t.DueDate, HasTime = t.HasTime, DeadlineSetAt = t.DeadlineSetAt }).ToList() };
         }
@@ -394,7 +477,7 @@ namespace CornerTodo
             int urgent = TodoRules.UrgentCount(state, now);
             string summary = "逾期 " + overdue + " 项 · 6小时内 " + urgent + " 项";
             attentionText.Text = summary;
-            attentionText.Foreground = overdue > 0 ? Theme.Warning : urgent > 0 ? Theme.Urgent : Theme.Muted;
+            attentionText.Foreground = overdue > 0 ? palette.Warning : urgent > 0 ? palette.Urgent : palette.Muted;
             dateText.Text = state.Settings.Collapsed ? summary : now.ToString("M月d日 · dddd", CultureInfo.GetCultureInfo("zh-CN")) + (preview ? " · 示例" : "");
         }
 

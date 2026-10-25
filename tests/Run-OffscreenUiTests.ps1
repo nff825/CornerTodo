@@ -17,6 +17,7 @@ try {
     $arguments = @('/nologo', '/optimize+', '/target:exe', '/platform:anycpu', '/warn:4',
         '/main:OffscreenUiTests', ('/out:' + $testExecutable))
     foreach ($assembly in @('System.dll', 'System.Core.dll', 'System.Web.Extensions.dll', 'System.Xaml.dll',
+        'System.Windows.Forms.dll', 'System.Drawing.dll',
         'WPF\WindowsBase.dll', 'WPF\PresentationCore.dll', 'WPF\PresentationFramework.dll')) {
         $arguments += '/reference:' + (Join-Path $frameworkDirectory $assembly)
     }

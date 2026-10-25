@@ -23,6 +23,7 @@ try {
     [void]$parameters.ReferencedAssemblies.Add('System.Core.dll')
     [void]$parameters.ReferencedAssemblies.Add('System.Web.Extensions.dll')
     $sourceFiles = @(
+        (Join-Path $projectDirectory 'AppearanceSettings.cs'),
         (Join-Path $projectDirectory 'Models.cs'),
         (Join-Path $projectDirectory 'TodoStore.cs'),
         (Join-Path $PSScriptRoot 'StoreTests.cs')

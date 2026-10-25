@@ -42,6 +42,13 @@ internal static class StoreTests
             Run("Actual rescheduling resets progress while text and completion changes preserve it", ScheduleAndStateChanges);
             Run("Date-only attention uses next midnight, including after a reschedule", DateOnlyAttention);
             Run("Restart preserves timing, auto-expand preference and manual geometry without drift", AttentionRestartStability);
+            Run("New users get independent readable light appearance defaults", AppearanceDefaults);
+            Run("Old files retain their original appearance, even without Settings", LegacyAppearanceMigration);
+            Run("Appearance fields save independently without changing task dates or identity", AppearanceRoundTrip);
+            Run("Invalid optional appearance data cannot discard valid tasks", InvalidAppearanceRecovery);
+            Run("Saving invalid appearance normalizes only the affected fields", InvalidAppearanceSave);
+            Run("Opaque and fully transparent background endpoints survive restart", AppearanceTransparencyEndpoints);
+            Run("Cloning and normalization isolate live appearance from draft edits", AppearanceCloneIsolation);
             Console.WriteLine("PASS: " + passed + " tests");
             return 0;
         }
@@ -486,6 +493,205 @@ internal static class StoreTests
         }
         string json = File.ReadAllText(store.DataFilePath, Encoding.UTF8);
         Assert(json.Contains("\"DeadlineSetAt\":\"2026-10-20T14:00:00.0001234"), "Nullable scheduling timestamp was not saved in precise ISO format.");
+    }
+
+    private static void AppearanceDefaults()
+    {
+        AppearanceSettings light = new WidgetSettings().Appearance;
+        Assert(light != null && light.BackgroundTransparency == 20 && light.BackgroundColor == "#F4F9FB"
+            && light.PrimaryTextColor == "#193C50" && light.SecondaryTextColor == "#537486", "New settings are not the readable light preset.");
+        TodoStore store = Store("appearance-first-run");
+        Assert(store.Load().Settings.Appearance.Matches(light), "First launch did not use the new default appearance.");
+        Assert(!File.Exists(store.DataFilePath) && store.LoadWarning == null, "New appearance defaults unexpectedly wrote data or warned.");
+        AppearanceSettings dark = AppearanceSettings.CreateDark();
+        Assert(dark.BackgroundTransparency == 15 && dark.BackgroundColor == "#182B38"
+            && dark.PrimaryTextColor == "#F1F5F8" && dark.SecondaryTextColor == "#BAC8D2", "The dark preset does not match the agreed colors.");
+        AppearanceSettings original = AppearanceSettings.CreateOriginal();
+        AssertNear(original.BackgroundTransparency, 100.0 - 32.0 / 255.0 * 100.0, "Original background alpha was rounded or inverted.");
+        Assert(original.BackgroundColor == "#FFFFFF" && original.PrimaryTextColor == "#193C50"
+            && original.SecondaryTextColor == "#537486", "Original preset did not preserve version-one colors.");
+        light.BackgroundColor = "#123456";
+        Assert(new WidgetSettings().Appearance.BackgroundColor == "#F4F9FB", "New settings share a mutable appearance instance.");
+    }
+
+    private static string AppearanceDocument(string settingsJson)
+    {
+        return "{\"Version\":1,\"Items\":[{\"Id\":\"appearance-stable\",\"Text\":\"颜色不能影响任务 📌\",\"IsCompleted\":true,"
+            + "\"CreatedAt\":\"2026-10-20T09:00:00.0001234Z\",\"CompletedAt\":\"2026-10-24T10:00:00.0002468Z\","
+            + "\"DueDate\":\"2026-10-25T18:30:00.0005678\",\"HasTime\":true,\"DeadlineSetAt\":\"2026-10-24T08:00:00.0009876Z\"}]"
+            + (settingsJson == null ? "" : ",\"Settings\":" + settingsJson) + "}";
+    }
+
+    private static void AssertAppearanceTask(TodoState state)
+    {
+        Assert(state.Version == 1 && state.Items.Count == 1, "Appearance migration changed schema version or task count.");
+        TodoItem item = state.Items.Single();
+        Assert(item.Id == "appearance-stable" && item.Text == "颜色不能影响任务 📌" && item.IsCompleted && item.HasTime, "Appearance changed task identity, Unicode text or status.");
+        Assert(item.CreatedAt == new DateTime(2026, 10, 20, 9, 0, 0, DateTimeKind.Utc).AddTicks(1234)
+            && item.CreatedAt.Kind == DateTimeKind.Utc, "Appearance changed the creation timestamp.");
+        Assert(item.CompletedAt == new DateTime(2026, 10, 24, 10, 0, 0, DateTimeKind.Utc).AddTicks(2468)
+            && item.CompletedAt.Value.Kind == DateTimeKind.Utc, "Appearance changed the completion timestamp.");
+        Assert(item.DueDate == new DateTime(2026, 10, 25, 18, 30, 0, DateTimeKind.Unspecified).AddTicks(5678)
+            && item.DueDate.Kind == DateTimeKind.Unspecified, "Appearance changed the wall-clock deadline.");
+        Assert(item.DeadlineSetAt == new DateTime(2026, 10, 24, 8, 0, 0, DateTimeKind.Utc).AddTicks(9876)
+            && item.DeadlineSetAt.Value.Kind == DateTimeKind.Utc, "Appearance restarted the scheduling clock.");
+    }
+
+    private static void LegacyAppearanceMigration()
+    {
+        string[] legacySettings = { null, "null", "{}", "{\"Width\":460,\"Height\":530,\"AutoExpand\":false}" };
+        for (int i = 0; i < legacySettings.Length; i++)
+        {
+            TodoStore store = Store("appearance-migration-" + i);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            File.WriteAllText(store.DataFilePath, AppearanceDocument(legacySettings[i]), Encoding.UTF8);
+            byte[] originalBytes = File.ReadAllBytes(store.DataFilePath);
+            TodoState state = store.Load();
+            AssertAppearanceTask(state);
+            Assert(state.Settings.Appearance.Matches(AppearanceSettings.CreateOriginal()), "An old file silently changed to the new light preset.");
+            Assert(store.LoadWarning == null && originalBytes.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Loading a legacy file warned or rewrote the document.");
+            if (i == 3) Assert(state.Settings.Width == 460 && state.Settings.Height == 530 && !state.Settings.AutoExpand, "Appearance migration reset existing preferences.");
+            store.Save(state);
+            state = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+            AssertAppearanceTask(state);
+            Assert(state.Settings.Appearance.Matches(AppearanceSettings.CreateOriginal()), "The migrated original appearance did not survive restart.");
+            Assert(Directory.GetFiles(Path.GetDirectoryName(store.DataFilePath), "*.corrupt-*").Length == 0, "A valid legacy file was treated as damaged.");
+        }
+    }
+
+    private static void AppearanceRoundTrip()
+    {
+        TodoStore store = Store("appearance-round-trip");
+        Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+        File.WriteAllText(store.DataFilePath, AppearanceDocument("{\"Left\":-400,\"Top\":20,\"Width\":470,\"Height\":510,\"AutoExpand\":false}"), Encoding.UTF8);
+        TodoState state = store.Load();
+        AppearanceSettings draft = new AppearanceSettings {
+            BackgroundTransparency = 12.375, BackgroundColor = "#0a1b2c",
+            PrimaryTextColor = "#FeDcBa", SecondaryTextColor = "#987654"
+        };
+        state.Settings.Appearance = draft;
+        store.Save(state);
+        Assert(draft.BackgroundColor == "#0a1b2c" && draft.PrimaryTextColor == "#FeDcBa", "Saving unexpectedly mutated the caller's draft.");
+        state = store.Load();
+        AppearanceSettings appearance = state.Settings.Appearance;
+        Assert(appearance.BackgroundTransparency == 12.375 && appearance.BackgroundColor == "#0A1B2C"
+            && appearance.PrimaryTextColor == "#FEDCBA" && appearance.SecondaryTextColor == "#987654", "Independent appearance values were lost or not canonicalized.");
+        appearance.BackgroundColor = "#112233";
+        store.Save(state); state = store.Load();
+        Assert(state.Settings.Appearance.BackgroundColor == "#112233" && state.Settings.Appearance.BackgroundTransparency == 12.375
+            && state.Settings.Appearance.PrimaryTextColor == "#FEDCBA" && state.Settings.Appearance.SecondaryTextColor == "#987654", "Changing the background color reset another field.");
+        state.Settings.Appearance.BackgroundTransparency = 73.25;
+        store.Save(state); state = store.Load();
+        Assert(state.Settings.Appearance.BackgroundTransparency == 73.25 && state.Settings.Appearance.BackgroundColor == "#112233"
+            && state.Settings.Appearance.PrimaryTextColor == "#FEDCBA" && state.Settings.Appearance.SecondaryTextColor == "#987654", "Changing transparency reset a color.");
+        state.Settings.Appearance.PrimaryTextColor = "#445566";
+        store.Save(state); state = store.Load();
+        Assert(state.Settings.Appearance.PrimaryTextColor == "#445566" && state.Settings.Appearance.SecondaryTextColor == "#987654", "Primary and secondary text colors are coupled.");
+        state.Settings.Appearance.SecondaryTextColor = "#778899";
+        store.Save(state); state = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+        Assert(state.Settings.Appearance.SecondaryTextColor == "#778899" && state.Settings.Appearance.PrimaryTextColor == "#445566"
+            && state.Settings.Appearance.BackgroundColor == "#112233" && state.Settings.Appearance.BackgroundTransparency == 73.25, "Changing secondary text reset another appearance field.");
+        Assert(state.Settings.Left == -400 && state.Settings.Top == 20 && state.Settings.Width == 470 && state.Settings.Height == 510
+            && !state.Settings.AutoExpand && store.LoadWarning == null, "Appearance changes altered geometry, growth or data validity.");
+        AssertAppearanceTask(state);
+    }
+
+    private static void InvalidAppearanceRecovery()
+    {
+        string[] invalidObjects = { "null", "false", "[]", "\"not-an-object\"", "42" };
+        for (int i = 0; i < invalidObjects.Length; i++)
+        {
+            TodoStore store = Store("appearance-invalid-object-" + i);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            File.WriteAllText(store.DataFilePath, AppearanceDocument("{\"Appearance\":" + invalidObjects[i] + "}"), Encoding.UTF8);
+            TodoState state = store.Load();
+            AssertAppearanceTask(state);
+            Assert(state.Settings.Appearance.Matches(AppearanceSettings.CreateLight()) && store.LoadWarning == null, "Malformed optional appearance invalidated the user's data.");
+            Assert(Directory.GetFiles(Path.GetDirectoryName(store.DataFilePath), "*.corrupt-*").Length == 0, "Appearance alone caused a damaged-data archive.");
+        }
+        string[] invalidNumbers = { "-0.01", "100.01", "null", "\"20\"", "false", "{}", "[]" };
+        for (int i = 0; i < invalidNumbers.Length; i++)
+        {
+            TodoStore store = Store("appearance-invalid-field-" + i);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            File.WriteAllText(store.DataFilePath, AppearanceDocument("{\"Appearance\":{\"BackgroundTransparency\":" + invalidNumbers[i]
+                + ",\"BackgroundColor\":\"#abcdef\",\"PrimaryTextColor\":\"#12345G\",\"SecondaryTextColor\":\"#112233\"}}"), Encoding.UTF8);
+            TodoState state = store.Load();
+            AssertAppearanceTask(state);
+            Assert(state.Settings.Appearance.BackgroundTransparency == 20 && state.Settings.Appearance.BackgroundColor == "#ABCDEF"
+                && state.Settings.Appearance.PrimaryTextColor == "#193C50" && state.Settings.Appearance.SecondaryTextColor == "#112233", "Invalid fields did not fall back independently.");
+            Assert(store.LoadWarning == null && Directory.GetFiles(Path.GetDirectoryName(store.DataFilePath), "*.corrupt-*").Length == 0, "Invalid optional fields caused task recovery or data loss.");
+            store.Save(state);
+            AssertAppearanceTask(store.Load());
+        }
+    }
+
+    private static void InvalidAppearanceSave()
+    {
+        TodoStore store = Store("appearance-save-normalization");
+        double[] invalidNumbers = { Double.NaN, Double.PositiveInfinity, Double.NegativeInfinity, -1, 101 };
+        TodoState state = State("外观异常也不能丢失");
+        for (int i = 0; i < invalidNumbers.Length; i++)
+        {
+            state.Settings.Appearance = new AppearanceSettings {
+                BackgroundTransparency = invalidNumbers[i], BackgroundColor = "#123456",
+                PrimaryTextColor = "#FF000000", SecondaryTextColor = "#abcdef"
+            };
+            store.Save(state);
+            TodoState loaded = store.Load();
+            Assert(loaded.Settings.Appearance.BackgroundTransparency == 20 && loaded.Settings.Appearance.BackgroundColor == "#123456"
+                && loaded.Settings.Appearance.PrimaryTextColor == "#193C50" && loaded.Settings.Appearance.SecondaryTextColor == "#ABCDEF", "Invalid appearance made a valid state unsavable or discarded good fields.");
+            Assert(loaded.Items.Single().Id == "stable-id" && loaded.Items[0].Text == state.Items[0].Text && store.LoadWarning == null, "Appearance normalization changed tasks or produced damaged data.");
+        }
+        state.Settings.Appearance = null;
+        store.Save(state);
+        Assert(store.Load().Settings.Appearance.Matches(AppearanceSettings.CreateLight()), "A missing new in-memory appearance could not be saved safely.");
+        string[] invalidColors = { null, "", "red", "#FFF", "#11223344", "112233", "#１２３４５６", "#11223Z" };
+        foreach (string color in invalidColors)
+        {
+            AppearanceSettings normalized = AppearanceSettings.Normalize(new AppearanceSettings {
+                BackgroundTransparency = 55, BackgroundColor = color, PrimaryTextColor = "#A1B2C3", SecondaryTextColor = "#D4E5F6"
+            });
+            Assert(normalized.BackgroundColor == "#F4F9FB" && normalized.BackgroundTransparency == 55
+                && normalized.PrimaryTextColor == "#A1B2C3" && normalized.SecondaryTextColor == "#D4E5F6", "Invalid color affected another appearance field.");
+        }
+    }
+
+    private static void AppearanceTransparencyEndpoints()
+    {
+        TodoStore store = Store("appearance-endpoints");
+        TodoState state = State("背景透明不会改变文字颜色");
+        state.Settings.Appearance = AppearanceSettings.CreateDark();
+        state.Settings.Appearance.BackgroundTransparency = 100;
+        store.Save(state);
+        state = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+        Assert(state.Settings.Appearance.BackgroundTransparency == 100 && state.Settings.Appearance.BackgroundColor == "#182B38"
+            && state.Settings.Appearance.PrimaryTextColor == "#F1F5F8" && state.Settings.Appearance.SecondaryTextColor == "#BAC8D2", "Full background transparency erased independent colors.");
+        state.Settings.Appearance.BackgroundTransparency = 0;
+        store.Save(state); state = store.Load();
+        Assert(state.Settings.Appearance.BackgroundTransparency == 0 && state.Settings.Appearance.PrimaryTextColor == "#F1F5F8"
+            && state.Settings.Appearance.SecondaryTextColor == "#BAC8D2", "Opaque background was rejected or affected text color.");
+        Assert(state.Items.Single().Text == "背景透明不会改变文字颜色" && store.LoadWarning == null, "Transparency endpoints damaged the saved state.");
+    }
+
+    private static void AppearanceCloneIsolation()
+    {
+        AppearanceSettings original = AppearanceSettings.CreateDark();
+        AppearanceSettings draft = original.Clone();
+        Assert(!Object.ReferenceEquals(original, draft) && draft.Matches(original), "Clone did not create an equal independent value.");
+        draft.BackgroundTransparency = 100; draft.BackgroundColor = "#112233";
+        draft.PrimaryTextColor = "#445566"; draft.SecondaryTextColor = "#778899";
+        Assert(original.Matches(AppearanceSettings.CreateDark()), "Draft editing changed the saved appearance before confirmation.");
+        draft.BackgroundColor = "#abcdef";
+        AppearanceSettings normalized = AppearanceSettings.Normalize(draft);
+        Assert(!Object.ReferenceEquals(normalized, draft) && normalized.BackgroundColor == "#ABCDEF" && draft.BackgroundColor == "#abcdef", "Normalization mutated its caller.");
+        normalized.PrimaryTextColor = "#123456";
+        Assert(draft.PrimaryTextColor == "#445566", "Normalized preview and draft share a mutable object.");
+        AppearanceSettings light = AppearanceSettings.Normalize(null);
+        Assert(light.Matches(AppearanceSettings.CreateLight()) && !light.Matches(null), "Null appearance behavior is inconsistent.");
+        AppearanceSettings fresh = AppearanceSettings.CreateLight();
+        light.BackgroundColor = "#000000";
+        Assert(fresh.BackgroundColor == "#F4F9FB", "Factory or normalization returns a shared preset object.");
     }
 
     private static void AssertNear(double actual, double expected, string message)
