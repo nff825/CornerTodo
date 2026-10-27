@@ -115,7 +115,7 @@ Copy-Item -LiteralPath (Join-Path $projectDir 'CornerTodo.exe.config') -Destinat
 Write-Output ('Built: ' + $executablePath)
 
 if ($Test) {
-    foreach ($testName in @('Run-StoreTests.ps1', 'Run-GrowthLayoutTests.ps1', 'Run-OffscreenUiTests.ps1', 'Run-AppearanceUiTests.ps1')) {
+    foreach ($testName in @('Run-StoreTests.ps1', 'Run-GrowthLayoutTests.ps1', 'Run-OffscreenUiTests.ps1', 'Run-AppearanceUiTests.ps1', 'Run-StartupTests.ps1')) {
         $testScript = Join-Path (Join-Path $projectDir 'tests') $testName
         if (-not (Test-Path -LiteralPath $testScript)) {
             throw ('The requested test script was not found: ' + $testScript)

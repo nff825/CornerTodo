@@ -4,7 +4,7 @@
 
 ![CornerTodo 常态面板，图中内容为示例事项](docs/images/normal.png)
 
-本文以拟发布版本 **v1.1.0** 为例。可下载版本以本仓库的 **Releases** 页面为准。
+本文以拟发布版本 **v1.2.0** 为例。可下载版本以本仓库的 **Releases** 页面为准。
 
 ## 功能
 
@@ -15,19 +15,32 @@
 - 双击或右键编辑，右键删除并确认；未完成按截止时间排序，已完成按完成时间倒序。
 - 日期显示「今天」「明天」或具体日期；临近截止显示剩余时间，逾期显示已逾期时长。
 - 拖动标题移动位置，记住位置与常态大小；长文字换行、列表滚动，已完成区域和整个面板均可收起。
-- 数据自动保存到本机。应用不联网，不设置开机自启动，也不包含弹窗或声音提醒。
+- 数据自动保存到本机。应用不联网，也不包含弹窗或声音提醒。
+- 可自行开启登录自启动，默认关闭；首次运行和升级不会自动登记。
 
 ## 下载与运行
 
-在仓库的 **Releases** 中下载 `CornerTodo-v1.1.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
+在仓库的 **Releases** 中下载 `CornerTodo-v1.2.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
 
-`CornerTodo-v1.1.0-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
+`CornerTodo-v1.2.0-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
 
 系统目标为 **Windows 10 / 11，.NET Framework 4.7.2 或更新版本**。应用使用 C# / WPF 与 Windows 自带的框架库，没有第三方运行时依赖。桌面层显示会受到 Explorer、其他桌面工具、多显示器和缩放配置的影响，尚未保证所有环境组合的兼容性；无法连接桌面层时会提示并以普通窗口显示。
 
 便携版尚未进行代码签名，Windows 或 SmartScreen 可能显示「未知发布者」等信任提示。请根据下载来源、源码和文件摘要决定是否运行，并保持系统防护开启。`SHA256SUMS.txt` 可用于核对文件是否一致，摘要本身不构成安全保证。
 
-## 外观设置（v1.1.0）
+## 开机自启（登录后）
+
+默认关闭。首次运行和升级不会自动开启；需要时，在面板「⋯」菜单点击「开机自启（登录后）」。开启后，当前 Windows 用户下次登录时会启动 CornerTodo；关闭时仅删除本工具管理的快捷方式。
+
+- 登记使用当前用户启动文件夹中的 `CornerTodo-LoginStartup.lnk`，不在 `Data\todos.json` 保存跨机器的启用开关。菜单勾选表示受管快捷方式已登记。
+- Windows 若在系统设置或任务管理器中禁用了该启动项，菜单仍可能显示已登记；需要你在 Windows 中重新启用。程序不会偷偷重建快捷方式来绕过禁用。
+- 从菜单退出只结束本次运行，保留登录自启动登记。自动重复启动会静默退出，不展开或重置已经运行的面板。
+- 原目录升级并保留程序路径时，已开启的登记继续保留。移动目录后，请手动打开新位置的程序，再点击「更新自启位置为当前程序」；程序不会自动替换旧目标。
+- 删除软件前，请先从菜单关闭登录自启动，避免留下失效的快捷方式。
+
+更多说明和手动检查步骤见 [登录自启动说明](docs/STARTUP.md)。
+
+## 外观设置
 
 从面板「⋯」菜单打开「外观设置」。背景透明度可在 0%～100% 之间调节：0% 为实色背景，100% 为全透明背景。该设置只影响背景，主要与次要文字不会跟着变淡。
 
@@ -69,7 +82,7 @@ powershell -NoProfile -File .\Build.ps1
 powershell -NoProfile -File .\Build.ps1 -Test
 ```
 
-四类测试也可单独运行：
+五类测试也可单独运行：
 
 | 测试 | 命令 | 范围 |
 | --- | --- | --- |
@@ -77,8 +90,9 @@ powershell -NoProfile -File .\Build.ps1 -Test
 | 增长布局 | `powershell -NoProfile -File .\tests\Run-GrowthLayoutTests.ps1` | 尺寸上限、锚点、屏幕边界、DPI 与异常输入 |
 | WPF 离屏界面 | `powershell -NoProfile -File .\tests\Run-OffscreenUiTests.ps1` | 示例界面布局与渲染，结果写入 `tests\visual-qa` |
 | 外观设置界面 | `powershell -NoProfile -File .\tests\Run-AppearanceUiTests.ps1` | 背景透明度、主题预览／保存／回滚、编辑器交互，结果写入 `tests\appearance-qa` |
+| 登录自启动 | `powershell -NoProfile -File .\tests\Run-StartupTests.ps1` | 登录参数、受管快捷方式登记／关闭／更新、重复启动及菜单行为，使用隔离测试环境 |
 
-离屏测试覆盖界面渲染，实际桌面显示仍需在目标 Windows 环境中检查。
+离屏测试覆盖界面渲染，实际桌面显示仍需在目标 Windows 环境中检查。真实登录回归由使用者在方便时手动进行；测试不会注销或重启电脑。
 
 ## 预览与测试参数
 
@@ -94,19 +108,19 @@ powershell -NoProfile -File .\Build.ps1 -Test
 
 ## 打包与发布
 
-维护者可运行下面的命令。脚本会从源码白名单建立干净副本，在副本中构建并运行四类测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
+维护者可运行下面的命令。脚本会从源码白名单建立干净副本，在副本中构建并运行五类测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.1.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.2.0
 ```
 
 产物位于 `release`：
 
-- `CornerTodo-v1.1.0-source.zip`
-- `CornerTodo-v1.1.0-windows-portable.zip`
+- `CornerTodo-v1.2.0-source.zip`
+- `CornerTodo-v1.2.0-windows-portable.zip`
 - `SHA256SUMS.txt`
 
-`release\CornerTodo-v1.1.0-source` 保留干净的源码展开目录，可直接将其中的内容上传到 GitHub。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
+`release\CornerTodo-v1.2.0-source` 保留干净的源码展开目录，可直接将其中的内容上传到 GitHub。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
 
 ## 许可证
 

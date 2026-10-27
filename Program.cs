@@ -2,8 +2,6 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
@@ -20,6 +18,7 @@ namespace CornerTodo
         private static Mutex mutex;
         private static bool windowed;
         private static bool preview;
+        private static bool startup;
         private static bool quitting;
         private static bool recovering;
         private static EventWaitHandle wakeEvent;
@@ -32,23 +31,21 @@ namespace CornerTodo
         {
             Thread.CurrentThread.CurrentCulture = CultureInfo.GetCultureInfo("zh-CN");
             Thread.CurrentThread.CurrentUICulture = CultureInfo.GetCultureInfo("zh-CN");
-            string dataDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
-            for (int i = 0; i < args.Length; i++)
-            {
-                if (args[i] == "--data-dir" && i + 1 < args.Length) dataDirectory = Path.GetFullPath(args[++i]);
-                else if (args[i] == "--preview") { preview = true; windowed = true; }
-                else if (args[i] == "--windowed") windowed = true;
-            }
             try
             {
+                LaunchOptions options = LaunchOptions.Parse(args, AppDomain.CurrentDomain.BaseDirectory);
+                string dataDirectory = options.DataDirectory;
+                preview = options.Preview; windowed = options.Windowed; startup = options.Startup;
                 Diagnostics.Initialize(dataDirectory);
-                Diagnostics.Log("Starting pid=" + System.Diagnostics.Process.GetCurrentProcess().Id + ", windowed=" + windowed + ", preview=" + preview);
-                string key;
-                using (var hash = SHA256.Create()) key = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(dataDirectory.ToUpperInvariant() + (preview ? "-preview" : "")))).Replace("-", "").Substring(0, 24);
+                Diagnostics.Log("Starting pid=" + System.Diagnostics.Process.GetCurrentProcess().Id + ", windowed=" + windowed + ", preview=" + preview + ", startup=" + startup);
+                string key = LaunchOptions.GetInstanceKey(dataDirectory, preview);
                 bool first;
                 mutex = new Mutex(true, "Local\\CornerTodo-" + key, out first);
                 if (!first)
                 {
+                    // A logon launch must not move, expand or interrupt a window
+                    // that the user has already opened manually.
+                    if (startup) { Diagnostics.Log("Automatic duplicate ignored"); return; }
                     try
                     {
                         using (var signal = EventWaitHandle.OpenExisting("Local\\CornerTodo-Wake-" + key))
@@ -92,6 +89,7 @@ namespace CornerTodo
         private static void CreateWindow(TodoState state)
         {
             var created = new MainWindow(store, state, windowed, preview);
+            if (startup) created.ShowActivated = false;
             window = created;
             app.MainWindow = created;
             created.Closing += delegate {

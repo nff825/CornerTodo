@@ -18,6 +18,7 @@ namespace CornerTodo
         private TodoState state;
         private readonly bool windowed;
         private readonly bool preview;
+        private readonly IStartupManager startupManager;
         private readonly Border surface;
         private readonly Grid root;
         private readonly ScrollViewer scroll;
@@ -55,11 +56,26 @@ namespace CornerTodo
         private PanelPalette palette;
         private string dateStamp;
         private bool attachScheduled;
+        private bool waitingForDesktop;
+        private const string DesktopPendingMessage = "暂时无法连接桌面层。当前以普通窗口显示。";
         public bool HostLost { get; set; }
 
         public MainWindow(TodoStore store, TodoState state, bool windowed, bool preview)
+            : this(store, state, windowed, preview, null)
+        {
+        }
+
+        internal MainWindow(TodoStore store, TodoState state, bool windowed, bool preview, IStartupManager startupManager)
         {
             this.store = store; this.state = state; this.windowed = windowed; this.preview = preview;
+            if (startupManager != null) this.startupManager = startupManager;
+            else {
+                try {
+                    this.startupManager = new StartupManager(System.Reflection.Assembly.GetExecutingAssembly().Location,
+                        System.IO.Path.GetDirectoryName(store.DataFilePath));
+                }
+                catch (Exception ex) { this.startupManager = new UnavailableStartupManager(ex); }
+            }
             Title = "桌面待办"; WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
             AllowsTransparency = true; Background = Brushes.Transparent; ShowInTaskbar = windowed;
             ShowActivated = windowed; Topmost = false;
@@ -120,7 +136,12 @@ namespace CornerTodo
                 else UpdateExpansion(false, false);
             };
             hostTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-            hostTimer.Tick += delegate { if (!windowed) DesktopHost.ReattachIfNeeded(this); };
+            hostTimer.Tick += delegate {
+                if (!windowed) {
+                    DesktopHost.ReattachIfNeeded(this);
+                    if (waitingForDesktop && DesktopHost.IsAttached(this)) ClearDesktopPending();
+                }
+            };
             animationTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(40) };
             animationTimer.Tick += AnimationTick;
             MouseEnter += delegate { StopAnimation(); };
@@ -165,7 +186,14 @@ namespace CornerTodo
             bool attached = DesktopHost.Attach(this);
             DesktopHost.SetBounds(this, bounds);
             Diagnostics.Log("Attach after render: " + attached + ", bounds=" + DesktopHost.GetBounds(this) + ", error=" + DesktopHost.LastError);
-            if (!attached) ShowStatus("暂时无法连接桌面层。当前以普通窗口显示。");
+            if (!attached) { waitingForDesktop = true; ShowStatus(DesktopPendingMessage); }
+            else ClearDesktopPending();
+        }
+
+        private void ClearDesktopPending()
+        {
+            waitingForDesktop = false;
+            if (status.Text == DesktopPendingMessage) status.Visibility = Visibility.Collapsed;
         }
 
         public void RestoreToDesktop()
@@ -253,11 +281,20 @@ namespace CornerTodo
         private ContextMenu BuildMenu()
         {
             var menu = new ContextMenu();
+            var loginStartup = new MenuItem { Header = "开机自启（登录后）", IsCheckable = true, Tag = "login-startup" };
+            var repairStartup = new MenuItem { Header = "更新自启位置为当前程序", Tag = "repair-startup", Visibility = Visibility.Collapsed };
+            loginStartup.Click += delegate {
+                bool requested = loginStartup.IsChecked;
+                if (!TrySetStartup(requested)) loginStartup.IsChecked = !requested;
+                RefreshStartupMenu(loginStartup, repairStartup);
+            };
+            repairStartup.Click += delegate { TrySetStartup(true); RefreshStartupMenu(loginStartup, repairStartup); };
             menu.Opened += delegate {
                 foreach (var menuItem in menu.Items.OfType<MenuItem>()) {
                     if (Object.Equals(menuItem.Tag, "auto-expand")) menuItem.IsChecked = state.Settings.AutoExpand;
                     if (Object.Equals(menuItem.Tag, "completed-toggle")) menuItem.Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成";
                 }
+                RefreshStartupMenu(loginStartup, repairStartup);
             };
             var create = new MenuItem { Header = "添加待办" }; create.Click += delegate { Edit(null); }; menu.Items.Add(create);
             var showCompleted = new MenuItem { Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成", Tag = "completed-toggle" };
@@ -272,12 +309,63 @@ namespace CornerTodo
                 if (Commit(next)) UpdateExpansion(true, true);
             };
             menu.Items.Add(automatic);
+            menu.Items.Add(loginStartup); menu.Items.Add(repairStartup);
             var reset = new MenuItem { Header = "恢复右上角位置" }; reset.Click += delegate { ResetPosition(); }; menu.Items.Add(reset);
             var help = new MenuItem { Header = "使用说明" }; help.Click += delegate {
-                ShowModal("点击圆圈切换完成状态；双击事项或右键编辑。\n拖动标题调整位置；关闭菜单中的‘随截止时间扩大’后，可调整常态大小。\n紧急事项：距截止不超过6小时；逾期事项持续保持最大面板。\n自动扩展以右上角为锚点，最大占桌面宽度的一半、高度约72%。\n仅日期的事项到当天结束后才逾期。\n\n数据自动保存在：\n" + store.DataFilePath, "桌面待办", MessageBoxButton.OK, MessageBoxImage.Information, MessageBoxResult.OK);
+                ShowModal("点击圆圈切换完成状态；双击事项或右键编辑。\n拖动标题调整位置；关闭菜单中的‘随截止时间扩大’后，可调整常态大小。\n紧急事项：距截止不超过6小时；逾期事项持续保持最大面板。\n自动扩展以右上角为锚点，最大占桌面宽度的一半、高度约72%。\n仅日期的事项到当天结束后才逾期。\n开机自启默认关闭，可在菜单自行开启，仅当前账号登录后启动。\n退出仅关闭本次运行；移动程序后请更新自启位置。\n\n数据自动保存在：\n" + store.DataFilePath, "桌面待办", MessageBoxButton.OK, MessageBoxImage.Information, MessageBoxResult.OK);
             }; menu.Items.Add(help);
             menu.Items.Add(new Separator()); var quit = new MenuItem { Header = "退出待办" }; quit.Click += delegate { Program.Exit(); }; menu.Items.Add(quit);
             TrackMenu(menu); return menu;
+        }
+
+        private void RefreshStartupMenu(MenuItem enabled, MenuItem repair)
+        {
+            repair.Visibility = Visibility.Collapsed;
+            if (preview) {
+                enabled.IsChecked = false; enabled.IsEnabled = false;
+                enabled.ToolTip = "示例模式不会更改 Windows 自启动设置。";
+                return;
+            }
+            try {
+                StartupRegistration registration = startupManager.Inspect();
+                enabled.IsChecked = registration.Exists && registration.IsManaged;
+                enabled.IsEnabled = !registration.Exists || registration.IsManaged;
+                if (registration.Exists && !registration.IsManaged)
+                    enabled.ToolTip = "自启动文件被其他内容占用，未作修改。";
+                else if (registration.Exists && !registration.MatchesCurrent) {
+                    enabled.ToolTip = "已登记另一位置。可关闭此项，或更新为当前程序；不会自动迁移。";
+                    repair.Visibility = Visibility.Visible;
+                }
+                else enabled.ToolTip = "仅当前账号登录后启动；勾选表示快捷方式已登记。Windows 中禁用后需自行重新启用。";
+            }
+            catch (Exception ex) {
+                enabled.IsEnabled = false;
+                enabled.ToolTip = "无法检查开机自启：" + ex.Message;
+            }
+        }
+
+        internal bool TrySetStartup(bool enabled)
+        {
+            if (preview) return false;
+            try {
+                if (enabled) startupManager.Enable(); else startupManager.Disable();
+                ShowStatus(enabled ? "已登记当前位置，下次登录后由 Windows 启动。" : "开机自启已关闭，本次运行不受影响。");
+                return true;
+            }
+            catch (Exception ex) {
+                ShowStatus("开机自启设置未更改：" + ex.Message);
+                return false;
+            }
+        }
+
+        private sealed class UnavailableStartupManager : IStartupManager
+        {
+            private readonly Exception reason;
+            public UnavailableStartupManager(Exception reason) { this.reason = reason; }
+            public StartupRegistration Inspect() { throw Error(); }
+            public void Enable() { throw Error(); }
+            public void Disable() { throw Error(); }
+            private Exception Error() { return new InvalidOperationException("当前无法访问 Windows 登录启动目录。", reason); }
         }
 
         private void Edit(TodoItem item)

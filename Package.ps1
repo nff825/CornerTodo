@@ -32,12 +32,13 @@ $sourceFiles = @(
     'AssemblyInfo.cs', 'Build.ps1', 'Package.ps1', 'app.manifest', 'CornerTodo.exe.config',
     'AppearanceSettings.cs', 'AppearanceEditor.cs',
     'DesktopHost.cs', 'Diagnostics.cs', 'GrowthLayout.cs', 'MainWindow.cs', 'Models.cs',
-    'Program.cs', 'TaskEditor.cs', 'Theme.cs', 'TodoStore.cs',
+    'Program.cs', 'StartupManager.cs', 'LaunchOptions.cs', 'TaskEditor.cs', 'Theme.cs', 'TodoStore.cs',
     'tests/StoreTests.cs', 'tests/Run-StoreTests.ps1',
     'tests/GrowthLayoutTests.cs', 'tests/Run-GrowthLayoutTests.ps1',
     'tests/OffscreenUiTests.cs', 'tests/Run-OffscreenUiTests.ps1', 'tests/Inspect-Windows.ps1',
     'tests/AppearanceUiTests.cs', 'tests/Run-AppearanceUiTests.ps1',
-    'docs/PUBLISHING.md', 'docs/PORTABLE-README.txt', 'docs/RELEASE_NOTES.md',
+    'tests/StartupTests.cs', 'tests/LaunchOptionsTests.cs', 'tests/StartupUiTests.cs', 'tests/Run-StartupTests.ps1',
+    'docs/PUBLISHING.md', 'docs/PORTABLE-README.txt', 'docs/RELEASE_NOTES.md', 'docs/STARTUP.md',
     'docs/images/normal.png', 'docs/images/urgent.png', 'docs/images/overdue.png'
 )
 foreach ($relativePath in $sourceFiles) {
@@ -142,7 +143,7 @@ try {
     [System.IO.File]::WriteAllLines((Join-Path $workDirectory 'SHA256SUMS.txt'), [string[]]$checksums, $utf8)
     $report = @(
         ('CornerTodo v' + $Version),
-        'Clean public source build and all four test suites: PASS',
+        'Clean public source build and all five test suites: PASS',
         ('Source archive allowlist and per-file hashes: PASS (' + $sourceFiles.Count + ' files)'),
         ('Portable archive allowlist and per-file hashes: PASS (' + $portableFiles.Count + ' files)'),
         ('Executable file version: ' + $fileVersion),
