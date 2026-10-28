@@ -44,6 +44,7 @@ internal static class OffscreenUiTests
             RenderScenario("overdue", Scenario(now, true, true), now);
             ValidateBaselineSave();
             ValidateLegacyUtcEditor();
+            ValidateSortPersistence();
             Report.AppendLine("PASS: " + assertions + " assertions across 3 rendered scenarios.");
             Report.AppendLine("Scope: control tree, layout, typography, counts, completed decoration, settings state, render pixels and fake-host baseline persistence.");
             Report.AppendLine("Live desktop z-order, animations and native input are intentionally outside this offscreen check.");
@@ -70,8 +71,11 @@ internal static class OffscreenUiTests
         TodoState state = new TodoState();
         state.Settings.Width = 430; state.Settings.Height = 475;
         state.Settings.AutoExpand = true;
-        state.Items.Add(Item("normal-one", "向李老师汇报研究进展", now.AddDays(2), now, false));
-        state.Items.Add(Item("normal-two", "整理实验数据并核对下周测量方案", now.AddDays(3), now, false));
+        state.Items.Add(Item("normal-one", "向李老师汇报研究进展", now.AddDays(2), now.AddDays(-1), false));
+        state.Items.Add(Item("normal-two", "整理实验数据并核对下周测量方案", now.AddDays(3), now.AddDays(-2), false));
+        state.Items[0].Notes = "汇总本周实验结果\n准备下阶段研究计划";
+        state.Items[0].Priority = TaskPriority.High;
+        state.Items[1].Priority = TaskPriority.Low;
         if (urgent) state.Items.Add(Item("urgent", "与王同学确认下午的实验方案", now.AddHours(2), now.AddHours(-22), false));
         if (overdue) state.Items.Add(Item("overdue", "给张老师发送论文修改稿", now.AddHours(-3), now.AddDays(-2), false));
         state.Items.Add(Item("completed", "完成阶段实验记录归档", now.AddHours(-6), now.AddDays(-2), true));
@@ -144,6 +148,49 @@ internal static class OffscreenUiTests
         finally { window.Close(); }
     }
 
+    private static void ValidateSortPersistence()
+    {
+        string isolatedData = Path.Combine(outputDirectory, "isolated-data", "sort-persistence");
+        TodoStore store = new TodoStore(isolatedData);
+        DateTime now = DateTime.Now;
+        TodoState initial = new TodoState(); initial.Settings.AutoExpand = false;
+        TodoItem near = Item("near", "近期的中优先级事项", now.AddDays(1), now.AddDays(-1), false);
+        TodoItem high = Item("high", "远期的高优先级事项", now.AddDays(30), now.AddDays(-5), false);
+        high.Priority = TaskPriority.High; high.Notes = "保存后重启仍保留\n第二行";
+        initial.Items.Add(near); initial.Items.Add(high); store.Save(initial);
+        MainWindow window = new MainWindow(store, initial, true, false);
+        try {
+            Button sorting = Descendants(window.Panel.List).OfType<Button>().Single(button =>
+                System.Windows.Automation.AutomationProperties.GetName(button) == "排序方式");
+            MenuItem priority = sorting.ContextMenu.Items.OfType<MenuItem>().Single(item => Object.Equals(item.Tag, TaskSortMode.Priority));
+            priority.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, priority));
+            Assert(window.CurrentState.Settings.SortMode == TaskSortMode.Priority, "Main window did not commit the requested sort mode.");
+            Assert(window.Panel.List.Children.OfType<Grid>().First(row => row.Tag is string).Tag.Equals("high"), "Saved sort did not repaint rows in priority order.");
+            TodoState reloaded = new TodoStore(isolatedData).Load();
+            Assert(reloaded.Settings.SortMode == TaskSortMode.Priority && reloaded.Items.Single(item => item.Id == "high").Notes == high.Notes,
+                "Restart did not preserve sorting together with multiline notes.");
+            DateTime? epoch = window.CurrentState.Items.Single(item => item.Id == "high").DeadlineSetAt;
+            sorting = Descendants(window.Panel.List).OfType<Button>().Single(button =>
+                System.Windows.Automation.AutomationProperties.GetName(button) == "排序方式");
+            MenuItem deadline = sorting.ContextMenu.Items.OfType<MenuItem>().Single(item => Object.Equals(item.Tag, TaskSortMode.Deadline));
+            using (FileStream locked = new FileStream(store.DataFilePath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                deadline.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, deadline));
+            }
+            Assert(window.CurrentState.Settings.SortMode == TaskSortMode.Priority && window.Panel.StatusText.Visibility == Visibility.Visible,
+                "A failed sort save changed committed state or hid its failure message.");
+            Assert(sorting.ContextMenu.Items.OfType<MenuItem>().Single(item => item.IsChecked).Tag.Equals(TaskSortMode.Priority),
+                "A failed main-window sort save left the wrong menu selection.");
+            Assert(window.CurrentState.Items.Single(item => item.Id == "high").DeadlineSetAt == epoch,
+                "Sorting reset the time-progress origin.");
+            deadline.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, deadline));
+            Assert(new TodoStore(isolatedData).Load().Settings.SortMode == TaskSortMode.Deadline,
+                "Retrying after a released lock did not persist deadline order.");
+            Assert(new WindowInteropHelper(window).Handle == IntPtr.Zero, "Sorting validation unexpectedly showed a window.");
+        }
+        finally { window.Close(); }
+        Report.AppendLine("  sort integration: persistence/reload, locked-file rollback and retry passed in isolated data.");
+    }
+
     private static void ValidateControls(MainWindow window, TodoState state, Border surface, DateTime now)
     {
         List<TextBlock> texts = Descendants(surface).OfType<TextBlock>().ToList();
@@ -164,7 +211,7 @@ internal static class OffscreenUiTests
             if (item.Id == "urgent" || item.Id == "overdue")
                 Assert(text.FontWeight == FontWeights.SemiBold, item.Id + ": highlighted task is not semibold.");
             Grid row = Descendants(surface).OfType<Grid>().Single(g => Object.Equals(g.Tag, item.Id));
-            TextBlock deadline = Descendants(row).OfType<TextBlock>().Single(t => t != text);
+            TextBlock deadline = Descendants(row).OfType<TextBlock>().Single(t => Object.Equals(t.Tag, "deadline"));
             Near(item.Id == "urgent" || item.Id == "overdue" ? 13 : 12, deadline.FontSize, item.Id + " deadline font size");
             if (item.Id == "urgent") Assert(deadline.Text.Contains("剩余"), "Urgent task lacks its remaining-time label.");
             if (item.Id == "overdue") Assert(deadline.Text.Contains("已逾期"), "Overdue task lacks its elapsed-time label.");

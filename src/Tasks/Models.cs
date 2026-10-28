@@ -5,10 +5,17 @@ using System.Linq;
 
 namespace CornerTodo
 {
+    public enum TaskPriority { High = 1, Normal = 2, Low = 3 }
+    public enum TaskSortMode { Deadline = 0, Priority = 1 }
+
     public sealed class TodoItem
     {
+        public TodoItem() { Notes = ""; Priority = TaskPriority.Normal; }
+
         public string Id { get; set; }
         public string Text { get; set; }
+        public string Notes { get; set; }
+        public TaskPriority Priority { get; set; }
         public bool IsCompleted { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
@@ -25,6 +32,7 @@ namespace CornerTodo
             Height = 475;
             AutoExpand = true;
             Appearance = AppearanceSettings.CreateLight();
+            SortMode = TaskSortMode.Deadline;
         }
 
         public double? Left { get; set; }
@@ -35,6 +43,7 @@ namespace CornerTodo
         public bool CompletedCollapsed { get; set; }
         public bool AutoExpand { get; set; }
         public AppearanceSettings Appearance { get; set; }
+        public TaskSortMode SortMode { get; set; }
     }
 
     public sealed class TodoState
@@ -53,6 +62,25 @@ namespace CornerTodo
 
     public static class TodoRules
     {
+        public const int MaxNotesLength = 5000;
+
+        public static string PriorityLabel(TaskPriority priority)
+        {
+            return priority == TaskPriority.High ? "高" : priority == TaskPriority.Low ? "低" : "中";
+        }
+
+        /// <summary>Elapsed scheduling time, independent of the final-24-hour attention curve.</summary>
+        public static double TimeProgress(TodoItem item, DateTime now)
+        {
+            if (item == null || item.IsCompleted) return 0;
+            DateTime deadline = Deadline(item);
+            DateTime current = LocalTime(now);
+            if (current >= deadline) return 1;
+            DateTime started = LocalTime(item.DeadlineSetAt ?? item.CreatedAt);
+            if (current <= started || deadline <= started) return 0;
+            return Math.Max(0, Math.Min(1, (current - started).TotalSeconds / (deadline - started).TotalSeconds));
+        }
+
         public static DateTime Deadline(TodoItem item)
         {
             if (item == null) throw new ArgumentNullException("item");
@@ -141,8 +169,12 @@ namespace CornerTodo
 
         public static IEnumerable<TodoItem> Pending(TodoState state)
         {
-            return Items(state).Where(item => !item.IsCompleted)
-                .OrderBy(item => Deadline(item))
+            IEnumerable<TodoItem> pending = Items(state).Where(item => !item.IsCompleted);
+            IOrderedEnumerable<TodoItem> ordered = state != null && state.Settings != null && state.Settings.SortMode == TaskSortMode.Priority
+                ? pending.OrderBy(item => Enum.IsDefined(typeof(TaskPriority), item.Priority) ? (int)item.Priority : (int)TaskPriority.Normal)
+                    .ThenBy(item => Deadline(item))
+                : pending.OrderBy(item => Deadline(item));
+            return ordered
                 .ThenBy(item => item.CreatedAt)
                 .ThenBy(item => item.Id, StringComparer.Ordinal);
         }

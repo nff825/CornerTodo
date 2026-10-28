@@ -17,7 +17,7 @@ namespace CornerTodo
                 Settings = new WidgetSettings {
                     Left = settings.Left, Top = settings.Top, Width = settings.Width, Height = settings.Height,
                     Collapsed = settings.Collapsed, CompletedCollapsed = settings.CompletedCollapsed,
-                    AutoExpand = settings.AutoExpand, Appearance = AppearanceSettings.Normalize(settings.Appearance)
+                    AutoExpand = settings.AutoExpand, Appearance = AppearanceSettings.Normalize(settings.Appearance), SortMode = settings.SortMode
                 }
             };
         }
@@ -26,7 +26,7 @@ namespace CornerTodo
         {
             if (item == null) throw new ArgumentNullException("item");
             return new TodoItem {
-                Id = item.Id, Text = item.Text, IsCompleted = item.IsCompleted,
+                Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsCompleted = item.IsCompleted,
                 CreatedAt = item.CreatedAt, CompletedAt = item.CompletedAt,
                 DueDate = item.DueDate, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt
             };

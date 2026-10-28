@@ -1,6 +1,6 @@
 # 开发工程说明
 
-当前应用版本为 **1.2.1**。已统一开发与构建入口，提取任务操作服务，拆分面板视图、交互控制器与启动生命周期。本版整理内部结构并修正恢复和清理边界，保持现有产品功能与数据格式。生产源码按职责归入 `src`，工程、配置与构建入口保留在根目录。
+当前源码版本为 **1.3.0**。在 v1.2.1 已完成的分层上增加事项备注、时间进度和优先级排序。生产源码继续按职责归入 `src`，工程、配置与构建入口保留在根目录，任务规则与界面交互分别维护。
 
 ## 工程与共享清单
 
@@ -22,6 +22,10 @@ build/Generate-Icon.ps1  脚本与工程共用的图标生成入口
 tests/                  原有功能测试及其脚本入口
 docs/                   使用、开发与发布说明
 ```
+
+本地运行与开发产物使用固定分区：`dist` 保留日常程序和 `Data`，脚本默认构建到 `output/build`；各版本发布文件放在 `release/v版本号`。历史构建归入 `archive/builds`，重复打包产生的备份归入 `archive/packages/v版本号/previous-bundles-*`。`output` 保留测试和离屏渲染结果；这些本机产物与归档都不进入公开源码包。
+
+数据位置取决于启动的 exe 或显式 `--data-dir` 参数。升级日常程序时应先退出、备份整个 `dist/Data`，然后只更新程序文件，继续使用同一数据目录。切换到其他输出目录运行会得到一份独立数据，不能据此判断旧数据不兼容。移动运行位置后还需检查已有登录自启动登记，按应用菜单显式更新目标。
 
 应用继续使用 .NET Framework 4.7.2、C# 5 和 AnyCPU。四个源码目录仍属于同一个应用项目、同一个程序集，命名空间保持 `CornerTodo`；本次不引入新的运行时依赖。
 
@@ -46,7 +50,7 @@ docs/                   使用、开发与发布说明
 | `SingleInstanceSession` | 保留按数据目录与预览模式区分的实例身份，管理命名互斥体及 Wake/Ack 通信，把恢复请求交给 UI 调度；不创建窗口，不管理待办 |
 | `ApplicationController` / `IApplicationWindow` | 管理当前主窗口、正常退出、句柄丢失后的延迟重建及排队恢复请求；通过窗口窄接口和可替换调度器测试，不直接实现原生桌面挂载 |
 | `ApplicationInteraction` | 跨替换窗口共享编辑状态、支持嵌套的模态作用域及退出请求；避免重建或退出打断仍在提交的编辑操作 |
-| `TaskEditor` / `TaskDraft` | 编辑器负责输入控件、格式校验与日期映射，仅返回 `Text`、`DueDate`、`HasTime` 三个输入字段；不生成任务 ID 或生命周期时间戳 |
+| `TaskEditor` / `TaskDraft` | 编辑器负责输入控件、格式校验与日期映射，返回 `Text`、`Notes`、`Priority`、`DueDate`、`HasTime`；不生成任务 ID 或生命周期时间戳 |
 | `MainWindow` | 连接视图、面板控制器、任务服务和挂载控制器，协调菜单、对话框及刷新；持有显示快照，通过 `Execute` 调用服务命令并展示错误，不自行修改或保存任务对象，也不重建主窗口 |
 | `TodoPanelView` / `TaskListView` | 构建面板和事项控件树，应用配色、文案、字号与折叠呈现，并向窗口转发新增、编辑、完成等操作意图；不保存数据，不决定窗口位置 |
 | `PanelPalette` | 根据外观设置提供面板、文字、按钮和勾选框的颜色及样式，不改变设置或任务状态 |
@@ -57,7 +61,7 @@ docs/                   使用、开发与发布说明
 | `TodoStateCopy` | 生产状态图的统一深复制入口，复制任务、设置与外观对象；不通过 JSON 往返复制状态，以免引入加载兼容逻辑 |
 | `ITodoStore` | 仅声明 `Save(TodoState)`，是服务所需的写入边界；不包含加载或界面能力 |
 | `TodoStore` | 实现写入接口，保留现有 JSON 加载、兼容读取、损坏恢复、原子保存与备份机制；加载仍由应用启动流程负责 |
-| `TodoRules` / `GrowthLayout` | 保留截止时间、排序、紧迫程度及增长几何的现有规则 |
+| `TodoRules` / `GrowthLayout` | 前者计算有效截止、线性时间进度、优先级标签、两种排序与紧迫程度；后者计算增长几何，两种进度不混用 |
 | `StartupManager` / `DesktopHost` | 继续负责 Windows 登录登记与原生桌面集成，不把这些系统状态移入待办 JSON |
 
 一次修改按以下顺序执行：
@@ -74,11 +78,22 @@ docs/                   使用、开发与发布说明
 ### 身份与时间规则
 
 - 新增任务由服务生成 ID，同一次新增使用同一个保存时刻设置 `CreatedAt` 和 `DeadlineSetAt`。
-- 编辑保留 ID、`CreatedAt`、完成状态及 `CompletedAt`。只有 `TodoRules.Deadline` 计算出的有效截止时间变化，才重设 `DeadlineSetAt`；文字变化或截止表达方式变化但有效时间相同，不会重置它。旧数据中的空 `DeadlineSetAt` 也按这个规则保留。
+- 编辑保留 ID、`CreatedAt`、完成状态及 `CompletedAt`。只有 `TodoRules.Deadline` 计算出的有效截止时间变化，才重设 `DeadlineSetAt`；文字、备注、优先级变化或截止表达方式变化但有效时间相同，不会重置它。旧数据中的空 `DeadlineSetAt` 也按这个规则保留。
 - 标记完成设置 `CompletedAt`，恢复未完成清空它；这些操作不修改创建时间、截止时间或调度起点。重复设置相同完成状态不再次保存。
 - 只填日期仍以次日零点为有效截止；UTC 截止先按本地时间显示。编辑器的日期／分钟控件未改时，会映射回原始 `DueDate` 的 ticks 和 `Kind`，避免控件精度丢失被误判成重新安排截止时间。有效截止是否变化最终仍由服务判断。
 
 `preview=true` 仍执行验证、命令和内存状态提交，但不调用写入接口；服务构造与快照读取也不写盘。`Session` 测试组使用假写入方、可控时钟及临时目录验证这些规则，不创建 WPF `Application`／`Window`，也不挂载真实桌面。
+
+### v1.3.0 任务字段、排序与时间条
+
+- `TodoItem.Notes` 与 `TaskDraft.Notes` 保存多行纯文字，默认空；备注不参与排序和截止判断。编辑输入上限由 `TodoRules.MaxNotesLength` 统一定义，已存内容不得在加载时静默截断。
+- `TaskPriority` 使用 `High=1`、`Normal=2`、`Low=3`，界面显示高／中／低，默认 `Normal`。`TodoStateCopy` 复制新字段，`TodoSession.Add/Edit` 校验后先保存再提交。
+- `WidgetSettings.SortMode` 使用 `TaskSortMode.Deadline` 或 `Priority`，默认 `Deadline`。`TodoSession.SetSortMode` 持久保存偏好；失败时保留原排序。截止模式按有效截止、创建时间、ID 排列；优先级模式在该稳定排序前增加优先级键，不额外按逾期或紧急状态分组。已完成排序维持完成时间倒序。
+- `TodoRules.TimeProgress(item, now)` 返回 0～1 的线性时间比例，以 `DeadlineSetAt ?? CreatedAt` 为起点，`TodoRules.Deadline(item)` 为终点。到期或逾期封顶为 1；未来起点、非正区间等边界需安全处理。界面隐藏已完成事项的时间条。
+- 时间条约 3 像素，百分比仅在悬停提示中显示。刷新从当前时间计算，不将每个百分比写回 JSON。面板自动扩大仍由原 `Urgency`／`Expansion` 规则驱动，不能把完整周期的线性进度直接作为面板扩大比例。
+- JSON 保留 `Version=1`，显式读写新字段；旧文件缺少新字段时读取为空备注、中优先级、截止时间优先。该兼容方向是新版读取旧数据；旧版写回会丢弃其不认识的新字段，回退时应恢复升级前 `Data` 备份。
+
+编辑器对新建事项默认收起备注，已有备注时展开；列表图标进入对应事项的备注区域。保存／取消仍遵循一次编辑事务，不在折叠、选择优先级或输入文字时单独保存。时间条、备注和优先级不引入联网、提醒、附件或子任务。
 
 ### 启动、退出与恢复
 
@@ -96,14 +111,14 @@ powershell -NoProfile -File .\Build.ps1
 
 脚本使用 Windows 自带的 .NET Framework C# 编译器；这条路径无需另装 .NET SDK、Visual Studio 或下载 NuGet 包。需要可用的 .NET Framework 编译器及 WPF 框架库。
 
-默认输出为 `dist\CornerTodo.exe`，同目录的 `CornerTodo.exe.config` 应一并保留。开发时优先使用独立目录：
+默认输出为 `output\build\CornerTodo.exe`，同目录的 `CornerTodo.exe.config` 应一并保留。需要另设开发输出，可指定：
 
 ```powershell
-powershell -NoProfile -File .\Build.ps1 -OutputDirectory dist-dev
-powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
+powershell -NoProfile -File .\Build.ps1 -OutputDirectory output\dev
+powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory output\dev
 ```
 
-第一条只构建；第二条构建并执行测试。独立目录用于避免覆盖正在运行的正式程序；不得把正式 `Data` 文件夹复制进去作为测试样本。
+第一条只构建；第二条构建并执行测试。默认目录与指定的开发目录都用于开发验证，正式 `Data` 应留在固定的日常运行目录。
 
 构建脚本不会启动应用、创建登录自启动项、修改真实待办或上传文件。运行生成的应用则会使用该应用所在目录旁的 `Data`，与其他便携副本保持独立。
 
@@ -114,7 +129,7 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
 1. 打开 `CornerTodo.sln`，确认项目为 `CornerTodo`。
 2. 选择 `Debug` 或 `Release`，平台为 `Any CPU`。
 3. 构建输出分别位于 `bin\Debug`、`bin\Release`；中间文件位于 `obj`。
-4. IDE 构建不会覆盖脚本的默认 `dist`，也不会自动替换正在使用的程序。
+4. IDE 构建与脚本默认的 `output/build` 分开，也不会自动替换日常 `dist` 中的程序。
 
 若开发环境已提供 `MSBuild.exe`，可从相应的开发者命令行运行：
 
@@ -170,7 +185,7 @@ msbuild .\CornerTodo.csproj /t:DescribeBuild
 
 ## 测试与调试数据
 
-共享清单目前登记十一组功能测试；原有入口保留，并增加单实例、桌面挂载调度及应用生命周期入口：
+共享清单目前登记十一组功能测试；v1.3.0 继续使用这些入口，并在对应套件中扩展任务字段、排序、时间进度和编辑器检查：
 
 ```powershell
 powershell -NoProfile -File .\tests\Run-StoreTests.ps1
@@ -186,7 +201,7 @@ powershell -NoProfile -File .\tests\Run-DesktopTests.ps1
 powershell -NoProfile -File .\tests\Run-LifecycleTests.ps1
 ```
 
-`Build.ps1 -Test` 执行共享清单登记的功能测试组。`Session` 套件按 `TestGroups=Session` 选择服务及其依赖源码，验证先保存后提交、保存失败与重试、状态图隔离、时间戳、预览，以及临时目录中的真实存储往返，不依赖 WPF 控件。`Panel` 套件用假宿主和可控时钟验证几何、动画与交互状态；`View` 套件检查未显示的控件树、呈现和操作意图。离屏界面测试另外覆盖控制器、窗口与预览服务之间的基准位置保存接线。
+`Build.ps1 -Test` 执行共享清单登记的功能测试组。`Store` 套件覆盖旧字段默认、JSON 往返、两种排序和时间进度边界。`Session` 套件按 `TestGroups=Session` 选择服务及其依赖源码，验证备注／优先级／排序命令、先保存后提交、保存失败与重试、状态图隔离、时间戳、预览，以及临时目录中的真实存储往返，不依赖 WPF 控件。`Panel` 套件用假宿主和可控时钟验证几何、动画与交互状态；`View` 套件检查未显示的控件树、呈现、编辑器输入及操作意图。离屏界面测试另外覆盖控制器、窗口与预览服务之间的基准位置保存接线。
 
 `Instance` 套件使用独立的命名空间验证单实例通信及释放，不启动正式应用。`Desktop` 套件使用未显示的窗口与假原生适配器，检查挂载调度、重试、丢失和取消回调。`Lifecycle` 套件先使用假窗口、手动调度器和内存状态，验证正常退出、模态保护、延迟恢复、最新快照及过期事件；另用未显示的真实主窗口检查菜单退出、共享交互保护、预览服务保存和回调取消的接线，不创建原生窗口句柄或挂载桌面。
 
@@ -205,7 +220,7 @@ powershell -NoProfile -File .\tests\Run-BuildTests.ps1
 调试程序时建议使用示例模式：
 
 ```powershell
-.\dist-dev\CornerTodo.exe --preview --windowed
+.\output\build\CornerTodo.exe --preview --windowed
 ```
 
 IDE 中也可为调试会话设置 `--preview --windowed` 参数。若需要创建可保存的测试事项，使用新的隔离目录传入 `--data-dir`，不要指向正式数据。所有运行方式的默认数据位置仍是正在运行的 `CornerTodo.exe` 旁的 `Data`，不因工程整理而改到项目根目录或用户配置目录。
@@ -215,9 +230,13 @@ IDE 中也可为调试会话设置 `--preview --windowed` 参数。若需要创�
 `Package.ps1` 仍负责从公开文件清单建立干净副本，在副本中构建、测试并生成本地便携包和源码包。源码包保留 `src/App`、`src/Tasks`、`src/UI`、`src/Windows` 的目录结构，工程文件、共享清单、共享脚本与开发说明一并保留；个人待办、日志、调试输出和本机自启动登记继续排除。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.2.1 -OutputDirectory release\v1.2.1
+powershell -NoProfile -File .\Package.ps1 -Version 1.3.0
 ```
 
-该命令会生成或更新本地 `release\v1.2.1` 产物；它不是开发日常构建的必要步骤，也不会替用户创建仓库、上传附件或发布 GitHub Release。v1.2.1 尚未发布，目录整理完成后重新生成该目录中的源码包、便携包、校验文件和干净源码目录。独立的版本目录保留旧版文件与校验记录；上传完整 `src` 并清理仓库旧根目录生产源码后，再为本次源码创建 `v1.2.1` 标签，保留已发布的 `v1.2.0`。
+`Package.ps1` 验证 `VERSION` 后，默认将本版产物生成到 `release\v1.3.0`；显式 `-OutputDirectory` 仍可覆盖为其他项目内目录。同一输出位置再次打包时，上一批源码目录、ZIP、摘要和报告会保存在 `archive/packages/v版本号/previous-bundles-*`，供本地回退使用；待办备份应通过原 `Data` 单独保留。
+
+这不是开发日常构建的必要步骤，也不会替用户创建仓库、上传附件或发布 GitHub Release。上传本次完整干净源码并核对测试结果后，再创建指向本次提交的 `v1.3.0` 标签，保留已发布的 `v1.2.1` 及更早版本。从已整理的 v1.2.1 仓库升级，无需再执行上一版本的旧根目录源码清理。
+
+发布前运行全部测试，并以本次 `PACKAGE-REPORT.txt`、测试日志和文件摘要为核对依据；没有完成的检查不得写成已通过。打包成功不等于已经完成原生桌面实机试用，也不代表已经发布到 GitHub。
 
 公开发布的网页步骤见 [PUBLISHING.md](PUBLISHING.md)；登录自启动行为见 [STARTUP.md](STARTUP.md)。

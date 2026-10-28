@@ -73,7 +73,11 @@ namespace CornerTodo
                 SetCompleted = delegate(TodoItem item, bool completed) {
                     return Execute(delegate { session.SetCompleted(item.Id, completed); }, "保存失败，修改尚未保存。", true);
                 },
-                Edit = Edit, Delete = Delete, TrackMenu = TrackMenu
+                Edit = Edit, EditNotes = delegate(TodoItem item) { EditTask(item, true); },
+                SetSortMode = delegate(TaskSortMode mode) {
+                    return Execute(delegate { session.SetSortMode(mode); }, "排序方式未保存。", true);
+                },
+                Delete = Delete, TrackMenu = TrackMenu
             });
             Content = panel.Surface;
             interaction = new PanelController(this, panel.Header, panel.Grip, panelHost ?? new DesktopPanelHost(this),
@@ -83,8 +87,12 @@ namespace CornerTodo
             saveTimer.Tick += delegate { saveTimer.Stop(); SaveGeometry(); };
             refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
             refreshTimer.Tick += delegate {
-                if (dateStamp != DateTime.Now.ToString("yyyyMMddHHmm")) {
-                    if (InteractionBlocked) { deferredRender = true; panel.UpdateHeader(this.state, DateTime.Now, preview); }
+                if (dateStamp != DateTime.Now.ToString("yyyyMMddHHmmss")) {
+                    if (InteractionBlocked) {
+                        deferredRender = true;
+                        panel.UpdateHeader(this.state, DateTime.Now, preview);
+                        panel.UpdateTimes(DateTime.Now);
+                    }
                     else Render();
                 }
                 else UpdateExpansion(false, false);
@@ -151,7 +159,7 @@ namespace CornerTodo
         private void Render()
         {
             DateTime now = DateTime.Now;
-            dateStamp = now.ToString("yyyyMMddHHmm"); deferredRender = false;
+            dateStamp = now.ToString("yyyyMMddHHmmss"); deferredRender = false;
             panel.Render(state, now, preview, appearancePreview);
             Foreground = panel.Palette.Ink;
             UpdateExpansion(false, false);
@@ -199,7 +207,7 @@ namespace CornerTodo
             menu.Items.Add(loginStartup); menu.Items.Add(repairStartup);
             var reset = new MenuItem { Header = "恢复右上角位置" }; reset.Click += delegate { ResetPosition(); }; menu.Items.Add(reset);
             var help = new MenuItem { Header = "使用说明" }; help.Click += delegate {
-                ShowModal("点击圆圈切换完成状态；双击事项或右键编辑。\n拖动标题调整位置；关闭菜单中的‘随截止时间扩大’后，可调整常态大小。\n紧急事项：距截止不超过6小时；逾期事项持续保持最大面板。\n自动扩展以右上角为锚点，最大占桌面宽度的一半、高度约72%。\n仅日期的事项到当天结束后才逾期。\n开机自启默认关闭，可在菜单自行开启，仅当前账号登录后启动。\n退出仅关闭本次运行；移动程序后请更新自启位置。\n\n数据自动保存在：\n" + store.DataFilePath, "桌面待办", MessageBoxButton.OK, MessageBoxImage.Information, MessageBoxResult.OK);
+                ShowModal("点击圆圈切换完成状态；双击事项或右键编辑。\n有备注的事项显示备注图标，点击即可查看或修改。\n细线表示已用时间，鼠标悬停可看百分比；满格表示到期，不代表完成。\n优先级可选高、中、低；列表顶部可切换截止时间优先或优先级优先。\n拖动标题调整位置；关闭菜单中的‘随截止时间扩大’后，可调整常态大小。\n紧急事项：距截止不超过6小时；逾期事项持续保持最大面板。\n自动扩展以右上角为锚点，最大占桌面宽度的一半、高度约72%。\n仅日期的事项到当天结束后才逾期。\n开机自启默认关闭，可在菜单自行开启，仅当前账号登录后启动。\n退出仅关闭本次运行；移动程序后请更新自启位置。\n\n数据自动保存在：\n" + store.DataFilePath, "桌面待办", MessageBoxButton.OK, MessageBoxImage.Information, MessageBoxResult.OK);
             }; menu.Items.Add(help);
             menu.Items.Add(new Separator()); var quit = new MenuItem { Header = "退出待办" }; quit.Click += delegate { applicationInteraction.RequestExit(); }; menu.Items.Add(quit);
             TrackMenu(menu); return menu;
@@ -245,23 +253,34 @@ namespace CornerTodo
             }
         }
 
-        private void Edit(TodoItem item)
+        private void Edit(TodoItem item) { EditTask(item, false); }
+
+        private void EditTask(TodoItem item, bool focusNotes)
         {
             if (disposed || applicationInteraction.IsBusy) return;
             applicationInteraction.EditorOpen = true; interaction.StopAnimation();
             try
             {
-                var editor = new TaskEditor(item);
+                var editor = new TaskEditor(item, focusNotes, delegate(TaskDraft draft) {
+                    return Execute(delegate {
+                        if (item == null) session.Add(draft);
+                        else session.Edit(item.Id, draft);
+                    }, "保存失败，输入仍保留在编辑窗口。", false);
+                });
                 Rect area = DesktopHost.WorkArea(this);
+                editor.MinWidth = Math.Min(editor.MinWidth, Math.Max(1, area.Width - 24));
+                editor.MinHeight = Math.Min(editor.MinHeight, Math.Max(1, area.Height - 24));
+                editor.MaxWidth = Math.Max(editor.MinWidth, area.Width - 24);
+                editor.MaxHeight = Math.Max(editor.MinHeight, area.Height - 24);
+                editor.Width = Math.Min(editor.Width, editor.MaxWidth);
+                editor.Height = Math.Min(editor.Height, editor.MaxHeight);
                 editor.WindowStartupLocation = WindowStartupLocation.Manual;
                 editor.Left = Math.Max(area.Left + 12, area.Right - editor.Width - 26);
                 editor.Top = Math.Max(area.Top + 20, Math.Min(DesktopHost.GetBounds(this).Top + 55, area.Bottom - editor.Height - 20));
                 if (editor.ShowDialog() == true)
                 {
-                    Execute(delegate {
-                        if (item == null) session.Add(editor.Result);
-                        else session.Edit(item.Id, editor.Result);
-                    }, "保存失败，修改尚未保存。", true);
+                    panel.StatusText.Visibility = Visibility.Collapsed;
+                    Render();
                 }
             }
             finally { applicationInteraction.EditorOpen = false; ResumeAttention(); }
@@ -385,7 +404,7 @@ namespace CornerTodo
                 resumeOperation = null;
                 resumeQueued = false;
                 if (disposed || !interaction.IsReady || HostLost || InteractionBlocked) return;
-                if (deferredRender || dateStamp != DateTime.Now.ToString("yyyyMMddHHmm")) Render();
+                if (deferredRender || dateStamp != DateTime.Now.ToString("yyyyMMddHHmmss")) Render();
                 else UpdateExpansion(false, false);
             }));
         }

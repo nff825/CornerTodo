@@ -33,6 +33,10 @@ internal static class SessionTests
             Run("Independent settings changes preserve tasks and the other settings", SettingsIsolation);
             Run("Preview operations change only the isolated session", Preview);
             Run("Real isolated persistence survives restart and a locked-save failure", RealStoreRoundTrip);
+            Run("Notes and priority preserve scheduling through edits, completion and restoration", DetailsLifecycle);
+            Run("Task detail validation rejects excessive notes and invalid ranks without committing", DetailsValidation);
+            Run("Sort preference changes are isolated, idempotent and survive restart", SortPreference);
+            Run("Only an effective deadline change resets full-interval time progress", TimeProgressReschedule);
             Console.WriteLine("PASS: " + passed + " session behavior tests.");
             Console.WriteLine("No WPF, production Data or Windows startup registration is used.");
             return 0;
@@ -282,13 +286,15 @@ internal static class SessionTests
         Action<TodoSession>[] operations = {
             delegate(TodoSession s) { s.Add(Draft("新增重试")); },
             delegate(TodoSession s) { s.Edit("fixture-one", Draft("编辑重试")); },
+            delegate(TodoSession s) { s.Edit("fixture-one", new TaskDraft { Text = "原始事项", DueDate = Due, HasTime = true, Notes = "备注重试\n第二行", Priority = TaskPriority.High }); },
             delegate(TodoSession s) { s.SetCompleted("fixture-one", true); },
             delegate(TodoSession s) { s.Delete("fixture-one"); },
             delegate(TodoSession s) { s.SetAppearance(AppearanceSettings.CreateDark()); },
             delegate(TodoSession s) { s.SetCompletedCollapsed(false); },
             delegate(TodoSession s) { s.SetAutoExpand(false); },
             delegate(TodoSession s) { s.SetCollapsed(true); },
-            delegate(TodoSession s) { s.SaveGeometry(100, 50, 500, 600); }
+            delegate(TodoSession s) { s.SaveGeometry(100, 50, 500, 600); },
+            delegate(TodoSession s) { s.SetSortMode(TaskSortMode.Priority); }
         };
         foreach (Action<TodoSession> operation in operations)
         {
@@ -321,6 +327,8 @@ internal static class SessionTests
         Equal(expected, session.Snapshot(), "Completed-region setting changed unrelated data");
         session.SetAutoExpand(false); expected.Settings.AutoExpand = false;
         Equal(expected, session.Snapshot(), "Auto-expand setting changed unrelated data");
+        session.SetSortMode(TaskSortMode.Priority); expected.Settings.SortMode = TaskSortMode.Priority;
+        Equal(expected, session.Snapshot(), "Sorting changed unrelated data");
         session.SetCollapsed(true); expected.Settings.Collapsed = true;
         Equal(expected, session.Snapshot(), "Panel collapse changed unrelated data");
         session.SaveGeometry(111.25, 55.75, 490, 610);
@@ -336,7 +344,7 @@ internal static class SessionTests
         TodoItem added = session.Add(Draft("示例新增"));
         session.Edit(added.Id, Draft("示例编辑")); session.SetCompleted(added.Id, true); session.SetCompleted(added.Id, false);
         session.SetAppearance(AppearanceSettings.CreateDark()); session.SetCompletedCollapsed(false);
-        session.SetAutoExpand(false); session.SetCollapsed(true); session.SaveGeometry(100, 50, 500, 600); session.Delete(added.Id);
+        session.SetAutoExpand(false); session.SetCollapsed(true); session.SetSortMode(TaskSortMode.Priority); session.SaveGeometry(100, 50, 500, 600); session.Delete(added.Id);
         Assert(writer.Arguments.Count == 0, "Preview wrote to persistent storage.");
         Assert(session.Snapshot().Settings.Collapsed && !session.Snapshot().Settings.AutoExpand && session.Snapshot().Settings.Appearance.Matches(AppearanceSettings.CreateDark()),
             "Preview failed to update its own isolated state.");
@@ -360,6 +368,99 @@ internal static class SessionTests
         restarted.Edit("fixture-one", Draft("解锁后重试"));
         Assert(store.Load().Items.Single().Text == "解锁后重试", "Retry after unlocking did not persist.");
         DateEqual(Due, store.Load().Items.Single().DueDate, "A real store retry changed UTC deadline precision");
+    }
+
+    private static void DetailsLifecycle()
+    {
+        DateTime now = Epoch;
+        var writer = new RecordingStore();
+        var session = new TodoSession(writer, new TodoState(), false, delegate { return now; });
+        TaskDraft draft = Draft("任务详情");
+        Assert(draft.Notes == "" && draft.Priority == TaskPriority.Normal, "New editor drafts lack the agreed defaults.");
+        string notes = "  联系维修人员 📌  \r\n记录故障情况\n地址 D:\\work\\记录";
+        draft.Notes = notes; draft.Priority = TaskPriority.High;
+        TodoItem added = session.Add(draft);
+        Assert(added.Notes == notes && added.Priority == TaskPriority.High, "Add lost multiline notes or priority.");
+        draft.Notes = "caller draft mutation"; added.Notes = "caller returned-item mutation"; added.Priority = TaskPriority.Low;
+        Assert(Only(session).Notes == notes && Only(session).Priority == TaskPriority.High, "Draft/returned value changed the committed details.");
+        TodoItem before = Only(session); now = now.AddHours(3);
+        var edited = Draft(before.Text, before.DueDate, before.HasTime); edited.Notes = "修改备注\n第二行"; edited.Priority = TaskPriority.Low;
+        session.Edit(before.Id, edited);
+        DateEqual(before.DeadlineSetAt.Value, Only(session).DeadlineSetAt.Value, "Editing notes/priority reset scheduling.");
+        DateEqual(before.CreatedAt, Only(session).CreatedAt, "Editing details reset creation history.");
+        session.SetCompleted(before.Id, true); session.SetCompleted(before.Id, false);
+        Assert(Only(session).Notes == edited.Notes && Only(session).Priority == TaskPriority.Low, "Complete/reopen lost details.");
+        TodoState isolated = session.Snapshot(); isolated.Items[0].Notes = "snapshot mutation"; isolated.Items[0].Priority = TaskPriority.High;
+        Assert(Only(session).Notes == edited.Notes && Only(session).Priority == TaskPriority.Low, "Snapshot details leaked mutable task ownership.");
+        edited.Notes = ""; session.Edit(before.Id, edited);
+        Assert(Only(session).Notes == "", "A user could not clear existing notes.");
+        var store = new TodoStore(Path.Combine(temporaryRoot, "details-restart"));
+        edited.Notes = notes; session.Edit(before.Id, edited); store.Save(session.Snapshot());
+        var restarted = new TodoSession(store, store.Load(), false, delegate { return now; });
+        Equal(session.Snapshot(), restarted.Snapshot(), "Restart lost task details or schedule history.");
+    }
+
+    private static void DetailsValidation()
+    {
+        var writer = new RecordingStore();
+        var session = new TodoSession(writer, Fixture(), false, delegate { return Epoch; });
+        TodoState before = session.Snapshot();
+        TaskDraft tooLong = Draft("too long"); tooLong.Notes = new string('字', TodoRules.MaxNotesLength + 1);
+        ExpectBusinessFailure(delegate { session.Add(tooLong); });
+        ExpectBusinessFailure(delegate { session.Edit("fixture-one", tooLong); });
+        TaskDraft invalidRank = Draft("invalid rank"); invalidRank.Priority = (TaskPriority)99;
+        ExpectBusinessFailure(delegate { session.Add(invalidRank); });
+        ExpectBusinessFailure(delegate { session.Edit("fixture-one", invalidRank); });
+        ExpectBusinessFailure(delegate { session.SetSortMode((TaskSortMode)99); });
+        Equal(before, session.Snapshot(), "Invalid detail input partially modified committed state.");
+        Assert(writer.Arguments.Count == 0, "Rejected draft input reached the writer.");
+        TaskDraft maximum = Draft("上限内可保存"); maximum.Notes = new string('字', TodoRules.MaxNotesLength);
+        session.Edit("fixture-one", maximum);
+        Assert(Only(session).Notes.Length == TodoRules.MaxNotesLength, "The documented note limit was not accepted.");
+        maximum.Notes = null; session.Edit("fixture-one", maximum);
+        Assert(Only(session).Notes == "", "An optional null note was not normalized to empty text.");
+    }
+
+    private static void SortPreference()
+    {
+        var writer = new RecordingStore(); var session = new TodoSession(writer, Fixture(), false, delegate { return Epoch; });
+        session.SetSortMode(TaskSortMode.Deadline);
+        Assert(writer.Arguments.Count == 0, "Re-selecting the active sort preference created an unnecessary save.");
+        session.SetSortMode(TaskSortMode.Priority);
+        TodoState expected = Fixture(); expected.Settings.SortMode = TaskSortMode.Priority;
+        Equal(expected, session.Snapshot(), "Sorting changed task details, geometry or scheduling.");
+        session.SetSortMode(TaskSortMode.Priority);
+        Assert(writer.Arguments.Count == 1, "Re-selecting priority sort saved twice.");
+        var store = new TodoStore(Path.Combine(temporaryRoot, "sort-restart")); store.Save(session.Snapshot());
+        Equal(expected, store.Load(), "Sort preference did not survive a real store restart.");
+        session.SetSortMode(TaskSortMode.Deadline);
+        Equal(Fixture(), session.Snapshot(), "Returning to deadline sort lost original state.");
+    }
+
+    private static void TimeProgressReschedule()
+    {
+        DateTime start = new DateTime(2026, 10, 28, 8, 0, 0, DateTimeKind.Local), now = start;
+        var session = new TodoSession(new RecordingStore(), new TodoState(), false, delegate { return now; });
+        TodoItem added = session.Add(Draft("三天任务", start.AddDays(3), true));
+        now = start.AddDays(1.5);
+        Assert(Math.Abs(TodoRules.TimeProgress(Only(session), now) - 0.5) < 0.000000001, "Task time was not halfway through its own interval.");
+        TaskDraft edit = Draft("改标题", added.DueDate, added.HasTime); edit.Notes = "补充信息"; edit.Priority = TaskPriority.High;
+        session.Edit(added.Id, edit); session.SetSortMode(TaskSortMode.Priority);
+        Assert(Math.Abs(TodoRules.TimeProgress(Only(session), now) - 0.5) < 0.000000001, "Details or sort reset the full scheduling interval.");
+        session.SetCompleted(added.Id, true);
+        Assert(TodoRules.TimeProgress(Only(session), now) == 0, "Completed task retained an active time bar.");
+        session.SetCompleted(added.Id, false);
+        Assert(Math.Abs(TodoRules.TimeProgress(Only(session), now) - 0.5) < 0.000000001, "Reopen reset the scheduling interval.");
+        edit.DueDate = now.AddDays(5); session.Edit(added.Id, edit);
+        Assert(TodoRules.TimeProgress(Only(session), now) == 0, "An actual deadline change did not start a new interval.");
+        now = now.AddDays(2.5);
+        Assert(Math.Abs(TodoRules.TimeProgress(Only(session), now) - 0.5) < 0.000000001, "Rescheduled five-day task used its previous interval.");
+        TodoState legacy = session.Snapshot(); legacy.Items[0].DeadlineSetAt = null;
+        var oldSession = new TodoSession(new RecordingStore(), legacy, true, delegate { return now; });
+        double oldProgress = TodoRules.TimeProgress(Only(oldSession), now);
+        oldSession.Edit(added.Id, edit);
+        Assert(Only(oldSession).DeadlineSetAt == null && TodoRules.TimeProgress(Only(oldSession), now) == oldProgress,
+            "A legacy record's creation-time fallback was reset by an ordinary edit.");
     }
 
     private static void ExpectBusinessFailure(Action action)

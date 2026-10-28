@@ -161,7 +161,7 @@ internal static class AppearanceUiTests
                 SolidColorBrush foreground = text.Foreground as SolidColorBrush;
                 Assert(foreground != null && foreground.Color.A == 255, "Attention text was faded by background transparency.");
                 Grid row = Descendants(window.Panel.Surface).OfType<Grid>().Single(g => Object.Equals(g.Tag, item.Id));
-                TextBlock due = Descendants(row).OfType<TextBlock>().Single(t => t != text);
+                TextBlock due = Descendants(row).OfType<TextBlock>().Single(t => Object.Equals(t.Tag, "deadline"));
                 Assert(due.Text.Contains(item.Id == "sample-urgent" ? "剩余" : "已逾期"), "Attention status disappeared after a theme change.");
             }
             CheckPanel(window, state.Settings.Appearance);

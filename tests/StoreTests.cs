@@ -49,6 +49,13 @@ internal static class StoreTests
             Run("Saving invalid appearance normalizes only the affected fields", InvalidAppearanceSave);
             Run("Opaque and fully transparent background endpoints survive restart", AppearanceTransparencyEndpoints);
             Run("Cloning and normalization isolate live appearance from draft edits", AppearanceCloneIsolation);
+            Run("Version-one files load optional task fields without rewriting or losing data", TaskDetailsMigration);
+            Run("Notes, priority and sort preference survive restart and clearing notes", TaskDetailsRoundTrip);
+            Run("Invalid optional ranks fall back and malformed note content is preserved for recovery", TaskDetailsReadPolicy);
+            Run("Invalid in-memory ranks are rejected before replacing the saved generation", InvalidRankSave);
+            Run("Priority sorting is optional, deterministic and does not affect completion history", PriorityOrdering);
+            Run("Time progress follows each full 3-, 5- and 30-day interval linearly", FullIntervalProgress);
+            Run("Time progress handles date-only, UTC, overdue and invalid scheduling bounds", TimeProgressBoundaries);
             Console.WriteLine("PASS: " + passed + " tests");
             return 0;
         }
@@ -692,6 +699,155 @@ internal static class StoreTests
         AppearanceSettings fresh = AppearanceSettings.CreateLight();
         light.BackgroundColor = "#000000";
         Assert(fresh.BackgroundColor == "#F4F9FB", "Factory or normalization returns a shared preset object.");
+    }
+
+    private static void TaskDetailsMigration()
+    {
+        Assert(new TodoItem().Notes == "" && new TodoItem().Priority == TaskPriority.Normal
+            && new WidgetSettings().SortMode == TaskSortMode.Deadline, "New task defaults do not match the agreed optional fields.");
+        foreach (string settings in new[] { (string)null, "{}", "{\"Width\":460,\"Height\":530}" })
+        {
+            TodoStore store = Store("details-legacy-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            File.WriteAllText(store.DataFilePath, AppearanceDocument(settings), Encoding.UTF8);
+            byte[] original = File.ReadAllBytes(store.DataFilePath);
+            TodoState state = store.Load();
+            AssertAppearanceTask(state);
+            Assert(state.Items.Single().Notes == "" && state.Items.Single().Priority == TaskPriority.Normal
+                && state.Settings.SortMode == TaskSortMode.Deadline, "Legacy data did not receive empty notes/normal priority/deadline sorting.");
+            Assert(store.LoadWarning == null && original.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Loading valid old data rewrote it or warned.");
+            store.Save(state);
+            AssertAppearanceTask(new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load());
+        }
+    }
+
+    private static void TaskDetailsRoundTrip()
+    {
+        TodoStore store = Store("details-roundtrip");
+        TodoState state = State("含备注事项");
+        string notes = "  保留缩进与空格  \r\n联系维修人员 📌\n路径 D:\\work\\文档，\"引号\"\t制表符";
+        state.Items[0].Notes = notes;
+        state.Items[0].Priority = TaskPriority.High;
+        state.Settings.SortMode = TaskSortMode.Priority;
+        state.Items[0].IsCompleted = true;
+        state.Items[0].CompletedAt = new DateTime(2026, 10, 28, 10, 0, 0, DateTimeKind.Utc);
+        store.Save(state);
+        state = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+        Assert(state.Items.Single().Notes == notes && state.Items[0].Priority == TaskPriority.High
+            && state.Settings.SortMode == TaskSortMode.Priority && state.Items[0].IsCompleted, "Restart lost note content/rank/sort/completion.");
+        state.Items[0].Notes = ""; state.Items[0].Priority = TaskPriority.Low;
+        store.Save(state); state = store.Load();
+        Assert(state.Items[0].Notes == "" && state.Items[0].Priority == TaskPriority.Low, "Clearing notes or changing rank was not persisted.");
+        // A future/externally authored long note must never be truncated by a geometry or appearance save.
+        string longNotes = new string('备', TodoRules.MaxNotesLength + 100);
+        state.Items[0].Notes = longNotes; store.Save(state); state = store.Load();
+        state.Settings.Width += 1; store.Save(state);
+        Assert(store.Load().Items[0].Notes == longNotes, "An unrelated save silently truncated an existing long note.");
+        state.Items[0].Notes = null; store.Save(state);
+        Assert(store.Load().Items[0].Notes == "", "Null optional notes could not be represented as empty text.");
+    }
+
+    private static void TaskDetailsReadPolicy()
+    {
+        string[] invalidRanks = { "0", "9", "null", "\"高\"", "true", "{}", "1.5" };
+        for (int i = 0; i < invalidRanks.Length; i++)
+        {
+            TodoStore store = Store("details-rank-recovery-" + i);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            string json = AppearanceDocument("{\"SortMode\":" + (i == 0 ? "9" : invalidRanks[i]) + "}")
+                .Replace("\"Text\":", "\"Notes\":null,\"Priority\":" + invalidRanks[i] + ",\"Text\":");
+            File.WriteAllText(store.DataFilePath, json, Encoding.UTF8);
+            byte[] before = File.ReadAllBytes(store.DataFilePath);
+            TodoState state = store.Load();
+            AssertAppearanceTask(state);
+            Assert(state.Items[0].Notes == "" && state.Items[0].Priority == TaskPriority.Normal && state.Settings.SortMode == TaskSortMode.Deadline,
+                "Invalid optional ranks did not fall back independently.");
+            Assert(store.LoadWarning == null && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Optional rank fallback destroyed or rewrote valid tasks.");
+        }
+        TodoStore malformed = Store("details-malformed-notes");
+        TodoState saved = State("备份事项"); saved.Items[0].Notes = "有效备注";
+        malformed.Save(saved); malformed.Save(saved);
+        string broken = File.ReadAllText(malformed.DataFilePath).Replace("\"Notes\":\"有效备注\"", "\"Notes\":{\"unexpected\":true}");
+        File.WriteAllText(malformed.DataFilePath, broken, Encoding.UTF8);
+        byte[] corrupt = File.ReadAllBytes(malformed.DataFilePath);
+        TodoState recovered = malformed.Load();
+        Assert(recovered.Items.Single().Notes == "有效备注" && malformed.LoadWarning != null, "Non-text notes were silently discarded instead of recovering known data.");
+        Assert(Directory.GetFiles(Path.GetDirectoryName(malformed.DataFilePath), "*.corrupt-*").Any(p => corrupt.SequenceEqual(File.ReadAllBytes(p))),
+            "Malformed note content was not preserved byte-for-byte.");
+    }
+
+    private static void InvalidRankSave()
+    {
+        TodoStore store = Store("invalid-rank-save"); TodoState state = State("保留原文件");
+        store.Save(state); byte[] before = File.ReadAllBytes(store.DataFilePath);
+        state.Items[0].Priority = (TaskPriority)99;
+        bool rejected = false;
+        try { store.Save(state); } catch (InvalidDataException) { rejected = true; }
+        Assert(rejected && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Invalid rank replaced saved data.");
+        state.Items[0].Priority = TaskPriority.Normal; state.Settings.SortMode = (TaskSortMode)99;
+        rejected = false;
+        try { store.Save(state); } catch (InvalidDataException) { rejected = true; }
+        Assert(rejected && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Invalid sort mode replaced saved data.");
+    }
+
+    private static void PriorityOrdering()
+    {
+        DateTime due = new DateTime(2026, 11, 1, 12, 0, 0);
+        TodoItem lowToday = Item("low-today", due, true); lowToday.Priority = TaskPriority.Low;
+        TodoItem highMonth = Item("high-month", due.AddMonths(1), true); highMonth.Priority = TaskPriority.High;
+        TodoItem normalLater = Item("normal-later", due.AddDays(2), true);
+        TodoItem normalB = Item("normal-b", due.AddDays(1), true), normalA = Item("normal-a", due.AddDays(1), true);
+        TodoItem normalOld = Item("normal-old", due.AddDays(1), true); normalOld.CreatedAt = normalOld.CreatedAt.AddDays(-1);
+        TodoItem done = Item("done", due.AddDays(-2), true); done.Priority = TaskPriority.High; done.IsCompleted = true; done.CompletedAt = due;
+        TodoState state = new TodoState { Items = new List<TodoItem> { normalB, highMonth, done, normalLater, normalA, lowToday, normalOld } };
+        string originalMembership = String.Join(",", state.Items.Select(item => item.Id));
+        Assert(String.Join(",", TodoRules.Pending(state).Select(item => item.Id)) == "low-today,normal-old,normal-a,normal-b,normal-later,high-month",
+            "The default deadline order changed when priority was added.");
+        state.Settings.SortMode = TaskSortMode.Priority;
+        Assert(String.Join(",", TodoRules.Pending(state).Select(item => item.Id)) == "high-month,normal-old,normal-a,normal-b,normal-later,low-today",
+            "Priority order did not apply deadline, creation time and ordinal ID as deterministic ties.");
+        Assert(String.Join(",", state.Items.Select(item => item.Id)) == originalMembership, "Sorting mutated the stored item order.");
+        Assert(TodoRules.Completed(state).Single().Id == "done", "Priority sorting changed completed membership.");
+        Assert(TodoRules.PriorityLabel(TaskPriority.High) == "高" && TodoRules.PriorityLabel(TaskPriority.Normal) == "中"
+            && TodoRules.PriorityLabel(TaskPriority.Low) == "低", "Priority labels contain numeric P tags or wrong translations.");
+    }
+
+    private static void FullIntervalProgress()
+    {
+        DateTime start = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Local);
+        foreach (int days in new[] { 3, 5, 30 })
+        {
+            TodoItem item = Item("time-" + days, start.AddDays(days), true); item.CreatedAt = start; item.DeadlineSetAt = start;
+            AssertNear(TodoRules.TimeProgress(item, start), 0, "Time progress did not start at zero.");
+            AssertNear(TodoRules.TimeProgress(item, start.AddDays(days * 0.25)), 0.25, "Time progress used the urgency curve or last-24-hour window.");
+            AssertNear(TodoRules.TimeProgress(item, start.AddDays(days * 0.5)), 0.5, "Full-interval midpoint was incorrect.");
+            AssertNear(TodoRules.TimeProgress(item, start.AddDays(days * 0.75)), 0.75, "Full-interval three-quarter point was incorrect.");
+            AssertNear(TodoRules.TimeProgress(item, start.AddDays(days)), 1, "Exact deadline was not full.");
+            AssertNear(TodoRules.TimeProgress(item, start.AddDays(days + 30)), 1, "Overdue time progress exceeded or fell below full.");
+        }
+        TodoItem longTask = Item("independent-attention", start.AddDays(30), true); longTask.DeadlineSetAt = start;
+        AssertNear(TodoRules.TimeProgress(longTask, start.AddDays(15)), 0.5, "Long-task progress was not halfway.");
+        AssertNear(TodoRules.Urgency(longTask, start.AddDays(15)), 0, "Time progress changed the existing attention behavior.");
+    }
+
+    private static void TimeProgressBoundaries()
+    {
+        DateTime start = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Local);
+        TodoItem item = Item("date-only-progress", start.Date, false); item.CreatedAt = start;
+        AssertNear(TodoRules.TimeProgress(item, start.AddHours(6)), 0.5, "A date-only time bar did not use next midnight.");
+        Assert(TodoRules.TimeProgress(item, start.Date.AddDays(1).AddTicks(-1)) < 1, "Date-only time bar filled before midnight.");
+        AssertNear(TodoRules.TimeProgress(item, start.Date.AddDays(1)), 1, "Date-only time bar did not fill at midnight.");
+        item.HasTime = true; item.DueDate = start.ToUniversalTime().AddHours(4); item.DeadlineSetAt = start.ToUniversalTime();
+        AssertNear(TodoRules.TimeProgress(item, start.AddHours(2)), 0.5, "UTC and local timestamps calculated different intervals.");
+        AssertNear(TodoRules.TimeProgress(item, start.AddHours(-1)), 0, "A clock before the schedule start gave negative progress.");
+        item.DeadlineSetAt = item.DueDate.AddDays(1);
+        AssertNear(TodoRules.TimeProgress(item, start), 0, "Negative scheduling interval was not handled safely.");
+        AssertNear(TodoRules.TimeProgress(item, item.DueDate), 1, "Invalid scheduling interval prevented an overdue bar from filling.");
+        item.DeadlineSetAt = item.DueDate;
+        AssertNear(TodoRules.TimeProgress(item, start), 0, "Zero interval produced non-finite progress.");
+        item.IsCompleted = true;
+        AssertNear(TodoRules.TimeProgress(item, start.AddYears(1)), 0, "A completed task still produced an active time bar value.");
+        AssertNear(TodoRules.TimeProgress(null, start), 0, "Missing task did not safely return zero.");
     }
 
     private static void AssertNear(double actual, double expected, string message)

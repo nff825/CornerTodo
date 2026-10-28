@@ -17,6 +17,8 @@ namespace CornerTodo
         public Action ToggleCompletedSection { get; set; }
         public Func<TodoItem, bool, bool> SetCompleted { get; set; }
         public Action<TodoItem> Edit { get; set; }
+        public Action<TodoItem> EditNotes { get; set; }
+        public Func<TaskSortMode, bool> SetSortMode { get; set; }
         public Action<TodoItem> Delete { get; set; }
         public Action<ContextMenu> TrackMenu { get; set; }
     }
@@ -106,6 +108,8 @@ namespace CornerTodo
             AttentionText.Foreground = overdue > 0 ? Palette.Warning : urgent > 0 ? Palette.Urgent : Palette.Muted;
             DateText.Text = state.Settings.Collapsed ? summary : now.ToString("M月d日 · dddd", CultureInfo.GetCultureInfo("zh-CN")) + (preview ? " · 示例" : "");
         }
+
+        internal void UpdateTimes(DateTime now) { taskList.UpdateTimes(now); }
 
         private void ApplyPalette(AppearanceSettings appearance)
         {

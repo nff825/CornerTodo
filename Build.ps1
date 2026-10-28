@@ -1,6 +1,6 @@
 param(
     [switch]$Test,
-    [string]$OutputDirectory = 'dist'
+    [string]$OutputDirectory = 'output/build'
 )
 
 $ErrorActionPreference = 'Stop'

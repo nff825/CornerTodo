@@ -150,7 +150,7 @@ namespace CornerTodo
             {
                 items.Add(new Dictionary<string, object>
                 {
-                    { "Id", item.Id }, { "Text", item.Text }, { "IsCompleted", item.IsCompleted },
+                    { "Id", item.Id }, { "Text", item.Text }, { "Notes", item.Notes ?? "" }, { "Priority", (int)item.Priority }, { "IsCompleted", item.IsCompleted },
                     { "CreatedAt", DateText(item.CreatedAt) },
                     { "CompletedAt", item.CompletedAt.HasValue ? DateText(item.CompletedAt.Value) : null },
                     { "DueDate", DateText(item.DueDate) }, { "HasTime", item.HasTime },
@@ -169,6 +169,7 @@ namespace CornerTodo
                         { "Collapsed", settings.Collapsed },
                         { "CompletedCollapsed", settings.CompletedCollapsed },
                         { "AutoExpand", settings.AutoExpand },
+                        { "SortMode", (int)settings.SortMode },
                         { "Appearance", new Dictionary<string, object>
                             {
                                 { "BackgroundTransparency", appearance.BackgroundTransparency },
@@ -204,6 +205,8 @@ namespace CornerTodo
                 {
                     Id = RequiredString(item, "Id"),
                     Text = RequiredString(item, "Text"),
+                    Notes = OptionalNotes(item),
+                    Priority = ReadPriority(item),
                     CreatedAt = RequiredDate(item, "CreatedAt"),
                     DueDate = RequiredDate(item, "DueDate"),
                     IsCompleted = Boolean(item, "IsCompleted", false),
@@ -226,6 +229,8 @@ namespace CornerTodo
                 state.Settings.Collapsed = Boolean(settings, "Collapsed", false);
                 state.Settings.CompletedCollapsed = Boolean(settings, "CompletedCollapsed", false);
                 state.Settings.AutoExpand = Boolean(settings, "AutoExpand", true);
+                state.Settings.SortMode = settings.TryGetValue("SortMode", out value) && value is int && Enum.IsDefined(typeof(TaskSortMode), value)
+                    ? (TaskSortMode)(int)value : TaskSortMode.Deadline;
                 if (settings.TryGetValue("Appearance", out value))
                     state.Settings.Appearance = ReadAppearance(value);
             }
@@ -258,10 +263,12 @@ namespace CornerTodo
                 if (item == null || String.IsNullOrWhiteSpace(item.Id) || String.IsNullOrWhiteSpace(item.Text))
                     throw new InvalidDataException("待办项缺少标识或内容。");
                 if (!ids.Add(item.Id)) throw new InvalidDataException("待办项标识重复。");
+                if (!Enum.IsDefined(typeof(TaskPriority), item.Priority)) throw new InvalidDataException("待办项优先级无效。");
                 if (item.CreatedAt == DateTime.MinValue || item.DueDate == DateTime.MinValue)
                     throw new InvalidDataException("待办项缺少创建时间或截止日期。");
             }
             WidgetSettings settings = state.Settings;
+            if (!Enum.IsDefined(typeof(TaskSortMode), settings.SortMode)) throw new InvalidDataException("排序方式无效。");
             if (!Finite(settings.Width) || !Finite(settings.Height) || settings.Width <= 0 || settings.Height <= 0)
                 throw new InvalidDataException("窗口宽高必须为有效正数。");
             if ((settings.Left.HasValue && !Finite(settings.Left.Value)) || (settings.Top.HasValue && !Finite(settings.Top.Value)))
@@ -283,6 +290,24 @@ namespace CornerTodo
             object value;
             if (!source.TryGetValue(key, out value) || !(value is string)) throw new InvalidDataException("缺少文本字段：" + key);
             return (string)value;
+        }
+
+        private static string OptionalNotes(IDictionary<string, object> source)
+        {
+            object value;
+            if (!source.TryGetValue("Notes", out value) || value == null) return "";
+            if (!(value is string)) throw new InvalidDataException("无效备注字段：Notes");
+            // Never truncate saved text. The editor/session limit applies to new input,
+            // while existing longer notes remain readable and survive unrelated saves.
+            return (string)value;
+        }
+
+        private static TaskPriority ReadPriority(IDictionary<string, object> source)
+        {
+            object value;
+            // Optional presentation/sorting fields must not discard otherwise valid tasks.
+            return source.TryGetValue("Priority", out value) && value is int && Enum.IsDefined(typeof(TaskPriority), value)
+                ? (TaskPriority)(int)value : TaskPriority.Normal;
         }
 
         private static DateTime RequiredDate(IDictionary<string, object> source, string key)

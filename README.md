@@ -2,11 +2,21 @@
 
 放在 Windows 桌面右上角的本地待办工具。用一句话记录要做的事，选择截止日期，完成后勾选归档。可定制颜色与透明度的面板保留桌面观感，临近截止时会逐渐扩大，提醒你关注尚未完成的事项。
 
-![CornerTodo 常态面板，图中内容为示例事项](docs/images/normal.png)
+当前源码版本为 **v1.3.0**。可下载文件以本仓库的 **Releases** 页面为准。
 
-当前版本为 **v1.2.1**。可下载文件以本仓库的 **Releases** 页面为准。
+v1.3.0 增加事项备注、时间进度细条，以及高／中／低优先级和排序选择。更新内容见 [更新记录](CHANGELOG.md)，开发者可从 [架构与构建说明](docs/DEVELOPMENT.md) 了解各组件的职责。
 
-v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。更新内容见 [更新记录](CHANGELOG.md)，开发者可从 [架构与构建说明](docs/DEVELOPMENT.md) 了解各组件的职责。
+## 界面预览
+
+以下为 v1.3.0 的实际 WPF 界面渲染，均使用示例事项。点击图片可查看大图。
+
+| 待办列表、时间细条与优先级 | 备注编辑 |
+| :---: | :---: |
+| [<img src="docs/images/normal.png" width="340" alt="v1.3.0 待办列表，显示细时间条、简短优先级和备注入口">](docs/images/normal.png) | [<img src="docs/images/notes-editor.png" width="340" alt="v1.3.0 编辑窗口，显示备注和高、中、低优先级选项">](docs/images/notes-editor.png) |
+| **临近截止，面板逐渐扩大** | **逾期持续督促** |
+| [<img src="docs/images/urgent.png" width="340" alt="临期事项显示剩余时间并推动面板扩大">](docs/images/urgent.png) | [<img src="docs/images/overdue.png" width="340" alt="逾期事项显示超时时长，时间条满格，面板保持最大">](docs/images/overdue.png) |
+| **深色主题** | **外观与透明度设置** |
+| [<img src="docs/images/dark.png" width="340" alt="v1.3.0 深色待办面板">](docs/images/dark.png) | [<img src="docs/images/appearance-editor.png" width="340" alt="外观设置，可调背景透明度、背景色及主要和次要文字颜色">](docs/images/appearance-editor.png) |
 
 ## 功能
 
@@ -14,7 +24,9 @@ v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。�
 - 外观设置：调整背景透明度、背景色和主要／次要文字颜色，提供浅色、深色和原版预设，实时预览后选择保存或取消。
 - 输入完整事项，单独选择截止日期，具体时刻可选；句子中的人物和时间无需拆成字段，截止时间由你手动选择。
 - 「未完成／已完成」两种状态。勾选后移入已完成区域并划线，取消勾选可恢复。
-- 双击或右键编辑，右键删除并确认；未完成按截止时间排序，已完成按完成时间倒序。
+- 双击或右键编辑，右键删除并确认；事项可添加多行纯文字备注，完成后仍保留。
+- 优先级为高／中／低，默认中；未完成可选择截止时间优先或优先级优先，已完成按完成时间倒序。
+- 未完成事项下方显示约 3 像素的时间进度细条，鼠标悬停查看时间已用比例；到期满格，完成后隐藏。
 - 日期显示「今天」「明天」或具体日期；临近截止显示剩余时间，逾期显示已逾期时长。
 - 拖动标题移动位置，记住位置与常态大小；长文字换行、列表滚动，已完成区域和整个面板均可收起。
 - 数据自动保存到本机。应用不联网，也不包含弹窗或声音提醒。
@@ -22,9 +34,9 @@ v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。�
 
 ## 下载与运行
 
-在仓库的 **Releases** 中下载 `CornerTodo-v1.2.1-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
+在仓库的 **Releases** 中下载 `CornerTodo-v1.3.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
 
-`CornerTodo-v1.2.1-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
+`CornerTodo-v1.3.0-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
 
 系统目标为 **Windows 10 / 11，.NET Framework 4.7.2 或更新版本**。应用使用 C# / WPF 与 Windows 自带的框架库，没有第三方运行时依赖。桌面层显示会受到 Explorer、其他桌面工具、多显示器和缩放配置的影响，尚未保证所有环境组合的兼容性；无法连接桌面层时会提示并以普通窗口显示。
 
@@ -52,9 +64,26 @@ v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。�
 
 新数据默认使用清晰浅色；旧版数据缺少外观设置时自动沿用原版外观。外观设置与待办数据一起保存在本地，修改外观不会改变事项、截止时间或保存的常态尺寸。
 
-## 截止时间与自动扩大
+## 备注、优先级与排序
 
-默认开启「随截止时间扩大」。未完成事项在截止前的最后 24 小时内推动面板逐渐扩大，越接近截止增长越快。如果创建或重新设置截止时间时只剩不足 24 小时，则使用这段较短的时间。例如，5 分钟后截止的事项会在这 5 分钟内逐渐扩大。重新打开程序或仅修改事项文字不会重置增长进度。
+添加或编辑事项时，可展开「备注（选填）」输入多行纯文字。新建时默认收起，编辑已有备注的事项时自动展开。列表只为有备注的事项显示小图标，点击图标即可进入备注；正文不铺满桌面。完成或恢复事项都保留备注，取消编辑不会保存本次输入。
+
+优先级可选「高／中／低」，新事项和缺少优先级的旧事项均默认为「中」。列表使用简短标签，不显示 P1、P2 等编号。排序有两种选择，并在本机记住：
+
+- **截止时间优先**：默认方式，越早截止越靠前。
+- **优先级优先**：高 → 中 → 低，同级内越早截止越靠前。
+
+优先级优先模式不会另外强制逾期置顶，因此下个月截止的高优先级事项可能排在今天截止的中优先级事项前面。两种排序下，临期和逾期提示都会继续显示。已完成区域仍按完成时间倒序。
+
+## 时间进度与自动扩大
+
+未完成事项的时间条按各自的完整期限线性推进：创建事项或重新设置有效截止时间时为起点，到截止时达到 100%。三天、五天、一个月的事项分别按自己的时间跨度计算。约 3 像素的细条位于截止信息下方，不常驻显示百分比；鼠标悬停可查看「时间已用」比例。它表示已经过去的时间，不表示工作完成度。
+
+逾期后时间条保持满格，同时显示逾期时长；已完成事项隐藏时间条，恢复未完成后按当前时间重新显示。重新打开程序、修改事项文字、备注、优先级或排序，都不会重置起点。旧事项优先使用已保存的截止设定时间，缺少该值时使用创建时间。
+
+时间条和面板扩大分别计算。时间条使用完整任务周期，面板扩大继续采用下方的临期规则。
+
+默认开启「随截止时间扩大」。未完成事项在截止前的最后 24 小时内推动面板逐渐扩大，越接近截止增长越快。如果创建或重新设置截止时间时只剩不足 24 小时，则使用这段较短的时间。例如，5 分钟后截止的事项会在这 5 分钟内逐渐扩大。重新打开程序或仅修改事项文字、备注、优先级不会重置增长进度。
 
 - 面板以右上角为锚点，向左、向下平滑扩大。最大宽度为当前桌面工作区的一半，高度约为 72%；以 2560 × 1528 的工作区为参考，上限为 1280 × 1100。实际尺寸按工作区比例和系统 DPI 换算，并受屏幕边界限制。
 - 多条事项共同影响一个面板：最紧迫的一条贡献最大，另外两条最紧迫的事项少量叠加。更多事项不会让面板突破上限。
@@ -66,9 +95,31 @@ v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。�
 
 ## 本地数据与备份
 
-默认数据位于 **`CornerTodo.exe` 同级的 `Data\todos.json`**，备份保存在同一数据目录。源码构建后通常是 `dist\Data\todos.json`。日常修改自动保存；移动程序或升级便携版前，请保留并备份整个 `Data` 文件夹。发布包不需要包含你的待办数据。
+默认数据位于 **`CornerTodo.exe` 同级的 `Data\todos.json`**，备份保存在同一数据目录。每份便携程序使用自己的 `Data`；换到新目录运行不会自动读取旧目录里的事项。日常修改自动保存，移动或升级前请保留并备份整个 `Data` 文件夹。
+
+长期使用建议固定一个运行目录。本地开发工作区以 `dist\CornerTodo.exe` 作为日常入口，使用 `dist\Data`；升级时先退出旧版、备份数据，再更新程序文件并保留原 `Data`。开发构建和测试使用 `output` 下的独立目录，发布包不包含个人待办数据。
 
 数据为本地 JSON 文件，没有加密；能够访问该文件的人可以读取其中的事项。遇到异常可检查数据目录中的 `CornerTodo.log`，日志记录启动、窗口状态、尺寸变化与错误，不记录事项文字。
+
+从 v1.2.1 升级时，缺少的新字段会按空备注、中优先级、截止时间优先读取。升级前先退出旧程序并备份整个 `Data`，再替换程序文件、保留原数据。旧版程序写回新版数据时会丢弃它不认识的备注、优先级和排序字段；需要回退时，应使用升级前备份，避免让新旧版本交替写入同一份数据。
+
+当前功能面向本机 Windows 使用，不包含手机端、跨设备同步、提醒通知、附件、富文本或子任务。
+
+## 本地工作区目录
+
+维护者的本地目录按用途分开；公开源码包只包含源码、工程、文档和测试文件：
+
+| 目录 | 用途 |
+| --- | --- |
+| `src`、`build`、`docs`、`tests` | 源码、构建工具、说明和测试 |
+| `dist` | 固定的日常运行程序及其 `Data` |
+| `output/build`、`output/dev` | 默认开发构建及指定的开发输出，使用独立数据 |
+| `release/v版本号` | 各版本的源码包、便携包、校验文件和干净源码目录 |
+| `archive/builds` | 历史构建目录，按原样保留其程序与数据 |
+| `archive/packages` | 历次打包结果和回退存档 |
+| `output` 下其他目录 | 测试记录、界面渲染和验证产物 |
+
+`release/v1.3.0` 是版本容器，内部文件保留 `CornerTodo-v1.3.0-…` 完整名称。重复打包时，上一批文件会存入 `archive/packages/v版本号/previous-bundles-*`；它们是发布文件备份，待办数据备份仍在对应的 `Data` 内。`dist`、`release`、`archive` 和开发输出均留在本机。
 
 ## 从源码构建
 
@@ -80,13 +131,13 @@ v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。�
 powershell -NoProfile -File .\Build.ps1
 ```
 
-默认输出为 `dist\CornerTodo.exe`，需保留同目录的 `CornerTodo.exe.config`。构建脚本也会生成应用图标。开发时建议指定独立输出目录，避免覆盖正在使用的程序；同时执行测试可运行：
+默认输出为 `output\build\CornerTodo.exe`，需保留同目录的 `CornerTodo.exe.config`。构建脚本也会生成应用图标，日常 `dist` 继续使用固定程序和数据。需要另设开发输出并同时执行测试，可运行：
 
 ```powershell
-powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
+powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory output\dev
 ```
 
-此时程序输出位于 `dist-dev`，原有 `dist\Data` 不参与该构建。构建不会自动启动程序、开启登录自启动或上传发布文件。
+此时程序输出位于 `output\dev`。构建不会自动启动程序、开启登录自启动或上传发布文件。
 
 需要在 IDE 中阅读和调试时，打开 `CornerTodo.sln`。这是 **.NET Framework 4.7.2、C# 5、AnyCPU** 的传统 WPF 工程，开发环境需要相应的 Visual Studio／MSBuild 和 4.7.2 Targeting Pack。IDE 构建输出为 `bin\Debug` 或 `bin\Release`，不覆盖 `dist`；直接运行便携版不需要安装这些开发工具。
 
@@ -94,11 +145,11 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
 
 | 测试 | 命令 | 范围 |
 | --- | --- | --- |
-| 数据与截止规则 | `powershell -NoProfile -File .\tests\Run-StoreTests.ps1` | 保存、恢复、排序、截止边界、紧迫程度与设置兼容 |
-| 任务操作服务（Session） | `powershell -NoProfile -File .\tests\Run-SessionTests.ps1` | 命令与时间戳规则、保存失败不提交、快照隔离、预览无写盘；不创建 WPF 窗口 |
+| 数据与截止规则 | `powershell -NoProfile -File .\tests\Run-StoreTests.ps1` | 保存、恢复、旧字段默认、两种排序、线性时间进度、截止边界及紧迫程度 |
+| 任务操作服务（Session） | `powershell -NoProfile -File .\tests\Run-SessionTests.ps1` | 备注／优先级／排序保存、命令与时间戳规则、保存失败不提交、快照隔离、预览无写盘；不创建 WPF 窗口 |
 | 增长布局 | `powershell -NoProfile -File .\tests\Run-GrowthLayoutTests.ps1` | 尺寸上限、锚点、屏幕边界、DPI 与异常输入 |
 | 面板交互控制器（Panel） | `powershell -NoProfile -File .\tests\Run-PanelTests.ps1` | 假屏幕宿主、可控时钟下的拖动、调整大小、增长动画及基准尺寸；不挂载桌面 |
-| 面板视图（View） | `powershell -NoProfile -File .\tests\Run-ViewTests.ps1` | 控件树、事项呈现及操作意图转发；不显示窗口 |
+| 面板视图（View） | `powershell -NoProfile -File .\tests\Run-ViewTests.ps1` | 控件树、事项呈现、编辑输入及操作意图转发；不显示窗口 |
 | WPF 离屏界面 | `powershell -NoProfile -File .\tests\Run-OffscreenUiTests.ps1` | 示例界面布局与渲染，结果写入 `tests\visual-qa` |
 | 外观设置界面 | `powershell -NoProfile -File .\tests\Run-AppearanceUiTests.ps1` | 背景透明度、主题预览／保存／回滚、编辑器交互，结果写入 `tests\appearance-qa` |
 | 登录自启动 | `powershell -NoProfile -File .\tests\Run-StartupTests.ps1` | 登录参数、受管快捷方式登记／关闭／更新及菜单行为，使用隔离测试环境 |
@@ -119,7 +170,7 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
 | `--windowed` | 以普通窗口打开，便于界面检查 |
 
 ```powershell
-.\dist\CornerTodo.exe --preview --windowed
+.\output\build\CornerTodo.exe --preview --windowed
 ```
 
 ## 打包与发布
@@ -127,16 +178,16 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
 维护者可运行下面的命令。脚本会从公开源码清单建立干净副本，在副本中构建并运行现有测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.2.1 -OutputDirectory release\v1.2.1
+powershell -NoProfile -File .\Package.ps1 -Version 1.3.0
 ```
 
-产物位于 `release\v1.2.1`：
+默认按 `VERSION` 输出到对应的 `release\v版本号`，本版产物位于 `release\v1.3.0`；仍可使用 `-OutputDirectory` 指定其他项目内目录：
 
-- `CornerTodo-v1.2.1-source.zip`
-- `CornerTodo-v1.2.1-windows-portable.zip`
+- `CornerTodo-v1.3.0-source.zip`
+- `CornerTodo-v1.3.0-windows-portable.zip`
 - `SHA256SUMS.txt`
 
-`release\v1.2.1\CornerTodo-v1.2.1-source` 保留包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。更新已有仓库时，还需移除原根目录的旧生产 `.cs` 路径，再创建版本标签。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
+`release\v1.3.0\CornerTodo-v1.3.0-source` 保留包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。从已经整理好的 v1.2.1 仓库更新时，沿用现有目录结构；确认源码更新完整后，再创建 v1.3.0 标签。发布前运行全部测试，并核对本次 `PACKAGE-REPORT.txt` 与文件摘要。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
 
 ## 许可证
 

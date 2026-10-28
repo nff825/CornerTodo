@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Version = '',
-    [string]$OutputDirectory = 'release'
+    [string]$OutputDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +17,7 @@ $metadata = [System.IO.File]::ReadAllText((Resolve-CornerTodoPath $projectDirect
 if ($metadata -notmatch ('AssemblyFileVersion\("' + [regex]::Escape($Version) + '\.0"\)')) {
     throw 'AssemblyInfo.cs and VERSION do not match.'
 }
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = 'release/v' + $Version }
 
 if ([System.IO.Path]::IsPathRooted($OutputDirectory)) { $outputDirectoryPath = $OutputDirectory }
 else { $outputDirectoryPath = Join-Path $projectDirectory $OutputDirectory }
@@ -100,7 +101,7 @@ try {
     $windowsPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $verificationRoot 'Build.ps1') -Test
     if ($LASTEXITCODE -ne 0) { throw 'The clean source build or tests failed; no release was replaced.' }
-    $builtDirectory = Join-Path $verificationRoot 'dist'
+    $builtDirectory = Join-Path $verificationRoot 'output/build'
     $builtExecutable = Join-Path $builtDirectory 'CornerTodo.exe'
     $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($builtExecutable).FileVersion
     if ($fileVersion -ne ($Version + '.0')) { throw 'The built executable has an unexpected version.' }
@@ -138,7 +139,15 @@ try {
     [System.IO.File]::WriteAllLines((Join-Path $workDirectory 'PACKAGE-REPORT.txt'), [string[]]$report, $utf8)
 
     # Publish locally only after every check succeeds. Preserve previous bundles.
-    $archiveDirectory = Join-Path $outputDirectoryPath ('previous-bundles-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6))
+    $backupRootPath = [System.IO.Path]::GetFullPath((Join-Path $projectDirectory 'archive/packages'))
+    $backupRootPrefix = $backupRootPath.TrimEnd('\') + '\'
+    $backupVersionRoot = Join-Path $backupRootPath ('v' + $Version)
+    $backupName = 'previous-bundles-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6)
+    $archiveDirectory = [System.IO.Path]::GetFullPath((Join-Path $backupVersionRoot $backupName))
+    if (-not $backupRootPath.StartsWith($projectPrefix, [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $archiveDirectory.StartsWith($backupRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid backup directory.' }
+    if (Test-Path -LiteralPath $archiveDirectory) { throw 'The generated backup directory already exists.' }
+    $archivePrefix = $archiveDirectory + '\'
     $published = @()
     $preserved = @()
     try {
@@ -148,9 +157,15 @@ try {
             if (-not $destination.StartsWith($outputPrefix, [System.StringComparison]::OrdinalIgnoreCase) -or
                 -not $stagedPath.StartsWith($outputPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid release destination.' }
             if (Test-Path -LiteralPath $destination) {
+                $firstBackup = -not (Test-Path -LiteralPath $archiveDirectory)
                 [void][System.IO.Directory]::CreateDirectory($archiveDirectory)
+                if ($firstBackup) {
+                    $origin = [ordered]@{ Version = $Version; OriginalOutputDirectory = $outputDirectoryPath;
+                        CreatedAt = (Get-Date).ToString('O') } | ConvertTo-Json
+                    [System.IO.File]::WriteAllText((Join-Path $archiveDirectory 'BACKUP-ORIGIN.json'), $origin, $utf8)
+                }
                 $preservedPath = [System.IO.Path]::GetFullPath((Join-Path $archiveDirectory $name))
-                if (-not $preservedPath.StartsWith($outputPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid backup destination.' }
+                if (-not $preservedPath.StartsWith($archivePrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid backup destination.' }
                 Move-Item -LiteralPath $destination -Destination $preservedPath
                 $preserved += @{ Original = $destination; Backup = $preservedPath }
             }

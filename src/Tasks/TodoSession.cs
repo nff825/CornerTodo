@@ -37,7 +37,7 @@ namespace CornerTodo
             TaskDraft input = ReadDraft(draft);
             DateTime savedAt = now();
             var item = new TodoItem {
-                Id = Guid.NewGuid().ToString("N"), Text = input.Text,
+                Id = Guid.NewGuid().ToString("N"), Text = input.Text, Notes = input.Notes, Priority = input.Priority,
                 DueDate = input.DueDate, HasTime = input.HasTime,
                 CreatedAt = savedAt, DeadlineSetAt = savedAt
             };
@@ -54,7 +54,8 @@ namespace CornerTodo
             TodoState next = Snapshot();
             TodoItem item = next.Items[index];
             DateTime previousDeadline = TodoRules.Deadline(item);
-            item.Text = input.Text; item.DueDate = input.DueDate; item.HasTime = input.HasTime;
+            item.Text = input.Text; item.Notes = input.Notes; item.Priority = input.Priority;
+            item.DueDate = input.DueDate; item.HasTime = input.HasTime;
             if (TodoRules.Deadline(item) != previousDeadline) item.DeadlineSetAt = now();
             Commit(next);
         }
@@ -92,6 +93,13 @@ namespace CornerTodo
         public void SetAutoExpand(bool enabled)
         {
             Change(delegate(TodoState next) { next.Settings.AutoExpand = enabled; });
+        }
+
+        public void SetSortMode(TaskSortMode mode)
+        {
+            if (!Enum.IsDefined(typeof(TaskSortMode), mode)) throw new ArgumentException("请选择有效的排序方式。", "mode");
+            if (current.Settings.SortMode == mode) return;
+            Change(delegate(TodoState next) { next.Settings.SortMode = mode; });
         }
 
         public void SetCollapsed(bool collapsed)
@@ -137,7 +145,10 @@ namespace CornerTodo
             if (draft == null) throw new ArgumentNullException("draft");
             if (String.IsNullOrWhiteSpace(draft.Text)) throw new ArgumentException("请填写待办事项。", "draft");
             if (draft.DueDate == DateTime.MinValue) throw new ArgumentException("请选择有效的截止日期。", "draft");
-            return new TaskDraft { Text = draft.Text.Trim(), DueDate = draft.DueDate, HasTime = draft.HasTime };
+            if (!Enum.IsDefined(typeof(TaskPriority), draft.Priority)) throw new ArgumentException("请选择有效的优先级。", "draft");
+            string notes = draft.Notes ?? "";
+            if (notes.Length > TodoRules.MaxNotesLength) throw new ArgumentException("备注最多可填写 " + TodoRules.MaxNotesLength + " 个字符。", "draft");
+            return new TaskDraft { Text = draft.Text.Trim(), Notes = notes, Priority = draft.Priority, DueDate = draft.DueDate, HasTime = draft.HasTime };
         }
 
         private static bool Finite(double value)

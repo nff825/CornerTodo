@@ -168,6 +168,14 @@ try {
     $compiledExe = Resolve-BuildTestPath 'o/CornerTodo.exe'
     Assert-BuildCheck (Test-Path -LiteralPath $compiledExe -PathType Leaf) 'The isolated application build did not produce an executable.'
 
+    # The default developer build must not overwrite a daily-use dist program.
+    Write-BuildTestFile 'dist/CornerTodo.exe' 'Synthetic daily-use executable sentinel.'
+    $dailyExecutable = Resolve-BuildTestPath 'dist/CornerTodo.exe'
+    $dailyExecutableHash = (Get-FileHash -LiteralPath $dailyExecutable -Algorithm SHA256).Hash
+    Invoke-BuildTestChild -ScriptName 'Build.ps1' -Arguments @() -Description 'default development build uses output/build and preserves the daily-use executable'
+    Assert-BuildCheck (Test-Path -LiteralPath (Resolve-BuildTestPath 'output/build/CornerTodo.exe') -PathType Leaf) 'The default build did not use output/build.'
+    Assert-BuildCheck ((Get-FileHash -LiteralPath $dailyExecutable -Algorithm SHA256).Hash -eq $dailyExecutableHash) 'The default build changed the daily-use executable sentinel.'
+
     # Move one declared production source and change only its shared Include.
     # Group metadata is retained; Build, runners, Package and csproj stay intact.
     $growthSources = @($isolatedDefinition.Sources | Where-Object { [IO.Path]::GetFileName($_.Path) -eq 'GrowthLayout.cs' })
@@ -233,6 +241,41 @@ try {
         Assert-BuildCheck ($archivedHash -eq (Get-FileHash -LiteralPath $newSourcePath -Algorithm SHA256).Hash) 'The moved source bytes differ from the packaged source.'
     }
     finally { $archive.Dispose() }
+
+    # Seed an older generation in the default version folder. One normal package
+    # run must publish the new generation and preserve all older bytes centrally.
+    $versionDirectory = 'release/v' + $version
+    $olderFiles = @(
+        ($archiveRoot + '/old-generation.txt'),
+        ($archiveRoot + '.zip'),
+        ('CornerTodo-v' + $version + '-windows-portable.zip'),
+        'SHA256SUMS.txt',
+        'PACKAGE-REPORT.txt'
+    )
+    $olderHashes = @{}
+    foreach ($relativePath in $olderFiles) {
+        $olderRelativePath = $versionDirectory + '/' + $relativePath
+        Write-BuildTestFile $olderRelativePath ('Synthetic previous package: ' + $relativePath)
+        $olderHashes[$relativePath] = (Get-FileHash -LiteralPath (Resolve-BuildTestPath $olderRelativePath) -Algorithm SHA256).Hash
+    }
+    Invoke-BuildTestChild -ScriptName 'Package.ps1' -Arguments @() -Description 'default package groups versions and archives the previous generation outside release'
+    Assert-BuildCheck (Test-Path -LiteralPath (Resolve-BuildTestPath ($versionDirectory + '/' + $archiveRoot + '.zip')) -PathType Leaf) 'The default source package was not placed in its version directory.'
+    Assert-BuildCheck (Test-Path -LiteralPath (Resolve-BuildTestPath ($versionDirectory + '/SHA256SUMS.txt')) -PathType Leaf) 'The default package checksums were not placed in the version directory.'
+    Assert-BuildCheck (-not (Test-Path -LiteralPath (Resolve-BuildTestPath 'release/SHA256SUMS.txt'))) 'The default package left unversioned checksums in release.'
+    $backupBase = Resolve-BuildTestPath ('archive/packages/v' + $version)
+    $backupDirectories = @(Get-ChildItem -LiteralPath $backupBase -Directory | Where-Object { $_.Name -match '^previous-bundles-\d{8}-\d{6}-[a-f0-9]{6}$' })
+    Assert-BuildCheck ($backupDirectories.Count -eq 1) 'The previous generation was not archived exactly once.'
+    $backupDirectory = $backupDirectories[0].FullName
+    foreach ($relativePath in $olderFiles) {
+        $preservedFile = [IO.Path]::GetFullPath((Join-Path $backupDirectory $relativePath))
+        Assert-BuildCheck ($preservedFile.StartsWith($sandboxPrefix, [StringComparison]::OrdinalIgnoreCase)) 'A previous-generation path escaped the isolated project.'
+        Assert-BuildCheck ((Get-FileHash -LiteralPath $preservedFile -Algorithm SHA256).Hash -eq $olderHashes[$relativePath]) ('The old package bytes were not preserved: ' + $relativePath)
+    }
+    $origin = Get-Content -LiteralPath (Join-Path $backupDirectory 'BACKUP-ORIGIN.json') -Raw | ConvertFrom-Json
+    Assert-BuildCheck ($origin.Version -eq $version -and $origin.OriginalOutputDirectory -eq (Resolve-BuildTestPath $versionDirectory)) 'The package backup does not identify its original output directory.'
+    Assert-BuildCheck (@(Get-ChildItem -LiteralPath (Resolve-BuildTestPath 'release') -Directory -Recurse | Where-Object { $_.Name -like 'previous-bundles-*' }).Count -eq 0) 'Package history is still scattered underneath release.'
+    Assert-BuildCheck (-not (Test-Path -LiteralPath (Resolve-BuildTestPath ($versionDirectory + '/' + $archiveRoot + '/old-generation.txt')))) 'An old package marker leaked into the new public source folder.'
+    Assert-BuildCheck ((Get-FileHash -LiteralPath $dailyExecutable -Algorithm SHA256).Hash -eq $dailyExecutableHash) 'Packaging changed the daily-use executable sentinel.'
 
     Assert-BuildCheck ((Get-FileHash -LiteralPath $sentinelPath -Algorithm SHA256).Hash -eq $sentinelHash) 'The isolated build changed its synthetic runtime-data sentinel.'
     Assert-BuildCheck ((Get-FileHash -LiteralPath $originalManifestPath -Algorithm SHA256).Hash -eq $originalManifestHash) 'The integration check changed the real shared definition.'
