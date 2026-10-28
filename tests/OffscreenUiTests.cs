@@ -8,7 +8,6 @@ using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -43,9 +42,10 @@ internal static class OffscreenUiTests
             RenderScenario("normal", Scenario(now, false, false), now);
             RenderScenario("urgent", Scenario(now, true, false), now);
             RenderScenario("overdue", Scenario(now, true, true), now);
+            ValidateBaselineSave();
             ValidateLegacyUtcEditor();
             Report.AppendLine("PASS: " + assertions + " assertions across 3 rendered scenarios.");
-            Report.AppendLine("Scope: control tree, layout, typography, counts, completed decoration, settings state and render pixels.");
+            Report.AppendLine("Scope: control tree, layout, typography, counts, completed decoration, settings state, render pixels and fake-host baseline persistence.");
             Report.AppendLine("Live desktop z-order, animations and native input are intentionally outside this offscreen check.");
             File.WriteAllText(Path.Combine(outputDirectory, "ui-validation.txt"), Report.ToString(), new UTF8Encoding(false));
             Console.Write(Report.ToString());
@@ -93,7 +93,7 @@ internal static class OffscreenUiTests
         try
         {
             Assert(new WindowInteropHelper(window).Handle == IntPtr.Zero, "An unshown window unexpectedly has an HWND.");
-            Border surface = Field<Border>(window, "surface");
+            Border surface = window.Panel.Surface;
             window.Content = null;
             // Detachment removes inherited Window properties; reproduce those
             // properties explicitly so these are the actual production fonts.
@@ -117,7 +117,7 @@ internal static class OffscreenUiTests
             canvas.UpdateLayout();
 
             ValidateControls(window, state, surface, now);
-            ScrollViewer scroll = Field<ScrollViewer>(window, "scroll");
+            ScrollViewer scroll = window.Panel.Scroll;
             Assert(scroll.ExtentHeight <= scroll.ViewportHeight + 0.5,
                 name + ": these sample tasks should fit without clipping or scrolling.");
 
@@ -138,7 +138,6 @@ internal static class OffscreenUiTests
                 scroll.ExtentHeight.ToString("0.###", CultureInfo.InvariantCulture) + "; viewport=" +
                 scroll.ViewportHeight.ToString("0.###", CultureInfo.InvariantCulture));
             ValidateMenuAndCollapsedState(window, state, now);
-            ValidateBaselineSave(window, target);
             Assert(!Directory.Exists(isolatedData), "Preview UI unexpectedly wrote data files.");
             Assert(new WindowInteropHelper(window).Handle == IntPtr.Zero, "Offscreen checks unexpectedly created an HWND.");
         }
@@ -176,7 +175,7 @@ internal static class OffscreenUiTests
         Assert(texts.Any(t => t.Text == "未完成  " + pending), "Pending section count is incorrect.");
         string summary = "逾期 " + state.Items.Count(t => t.Id == "overdue") + " 项 · 6小时内 " +
             state.Items.Count(t => t.Id == "urgent") + " 项";
-        Assert(Field<TextBlock>(window, "attentionText").Text == summary, "Urgency summary is incorrect.");
+        Assert(window.Panel.AttentionText.Text == summary, "Urgency summary is incorrect.");
         Assert(Descendants(surface).OfType<Button>().Any(b => (b.Content as string ?? "").Contains("已完成  1")),
             "Completed section count is incorrect.");
         Report.AppendLine("  typography: normal/completed=15, urgent=19, overdue=21; deadlines=12/13; " + summary);
@@ -190,36 +189,66 @@ internal static class OffscreenUiTests
         automatic.IsChecked = false;
         automatic.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, automatic));
         Assert(!window.CurrentState.Settings.AutoExpand, "The automatic-growth switch did not update state.");
-        Assert(Field<Thumb>(window, "grip").IsEnabled, "Manual sizing must be available when automatic growth is off.");
+        Assert(window.Panel.Grip.IsEnabled, "Manual sizing must be available when automatic growth is off.");
         automatic.IsChecked = true;
         automatic.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, automatic));
         Assert(window.CurrentState.Settings.AutoExpand, "Automatic growth could not be re-enabled.");
-        Assert(Field<Thumb>(window, "grip").IsEnabled == (TodoRules.Expansion(state, now) <= 0.00001),
+        Assert(window.Panel.Grip.IsEnabled == (TodoRules.Expansion(state, now) <= 0.00001),
             "Sizing-grip availability does not reflect attention-driven growth.");
         Invoke(window, "TogglePanel");
         Assert(window.CurrentState.Settings.Collapsed, "Collapsed state was not saved in the UI model.");
-        Assert(Field<ScrollViewer>(window, "scroll").Visibility == Visibility.Collapsed, "Collapsed panel still displays its task list.");
-        Assert(Field<Button>(window, "add").Visibility == Visibility.Collapsed, "Collapsed panel still displays its add button.");
-        Assert(Field<TextBlock>(window, "dateText").Text.Contains("6小时内"), "Collapsed header lacks its attention summary.");
+        Assert(window.Panel.Scroll.Visibility == Visibility.Collapsed, "Collapsed panel still displays its task list.");
+        Assert(window.Panel.AddButton.Visibility == Visibility.Collapsed, "Collapsed panel still displays its add button.");
+        Assert(window.Panel.DateText.Text.Contains("6小时内"), "Collapsed header lacks its attention summary.");
         Invoke(window, "TogglePanel");
         Assert(!window.CurrentState.Settings.Collapsed, "Collapsed panel could not be expanded.");
         Report.AppendLine("  interaction state: auto off/on and collapse/expand passed without showing UI.");
     }
 
-    private static void ValidateBaselineSave(MainWindow window, PanelBounds expanded)
+    private static void ValidateBaselineSave()
     {
-        // SaveGeometry should persist the user baseline, never this expanded
-        // render's current Width/Height. preview=true prevents all store writes.
-        SetField(window, "baseWidth", 430.0); SetField(window, "baseHeight", 475.0);
-        SetField(window, "anchorRight", 1600.0); SetField(window, "anchorTop", 18.0);
-        window.Width = expanded.Width; window.Height = expanded.Height;
-        SetField(window, "ready", true);
-        window.SaveGeometry();
-        SetField(window, "ready", false);
-        WidgetSettings saved = window.CurrentState.Settings;
-        Near(430, saved.Width, "Saved baseline width"); Near(475, saved.Height, "Saved baseline height");
-        Near(1170, saved.Left.Value, "Saved baseline left"); Near(18, saved.Top.Value, "Saved baseline top");
-        Report.AppendLine("  baseline save: 430x475 and right/top anchor retained; expanded geometry was not persisted.");
+        // Inject only a fake screen host. Exercise the real controller ->
+        // MainWindow.SaveGeometry -> preview session connection without HWNDs.
+        var host = new BaselineHost();
+        string dataPath = Path.Combine(outputDirectory, "isolated-data", "baseline-controller");
+        var state = new TodoState { Settings = new WidgetSettings { Width = 430, Height = 475, Left = 1170, Top = 18 } };
+        var window = new MainWindow(new TodoStore(dataPath), state, true, true, null, host);
+        try
+        {
+            window.Interaction.Initialize(window.CurrentState.Settings);
+            Assert(window.Interaction.IsReady && host.SetCalls == 0, "Initialization should calculate the baseline without moving a native window.");
+            window.Interaction.UpdateExpansion(1, false, true, true);
+            Assert(host.Bounds.Width > 430 && host.Bounds.Height > 475, "The fake host did not receive expanded panel bounds.");
+            Near(1600, host.Bounds.Right, "Expanded right anchor"); Near(18, host.Bounds.Top, "Expanded top anchor");
+            Rect baseline = window.Interaction.BaselineBounds;
+            Near(430, baseline.Width, "Controller baseline width after expansion");
+            Near(475, baseline.Height, "Controller baseline height after expansion");
+            Near(1170, baseline.Left, "Controller baseline left"); Near(18, baseline.Top, "Controller baseline top");
+            // A changed anchor makes this fail if the window forgets to call its
+            // session: unchanged constructor settings alone would hide a no-op save.
+            window.Interaction.BeginMove(new Point(0, 0));
+            window.Interaction.MoveTo(new Point(-40, 12));
+            window.Interaction.EndMove();
+            Near(1170, window.CurrentState.Settings.Left.Value, "Uncommitted movement left");
+            Near(18, window.CurrentState.Settings.Top.Value, "Uncommitted movement top");
+            window.SaveGeometry();
+            WidgetSettings saved = window.CurrentState.Settings;
+            Near(430, saved.Width, "Saved baseline width"); Near(475, saved.Height, "Saved baseline height");
+            Near(1130, saved.Left.Value, "Saved moved baseline left"); Near(30, saved.Top.Value, "Saved moved baseline top");
+            Assert(!Directory.Exists(dataPath), "Preview baseline persistence wrote application data.");
+            Assert(new WindowInteropHelper(window).Handle == IntPtr.Zero, "The fake-host baseline check unexpectedly created an HWND.");
+            Report.AppendLine("  baseline persistence: fake-host expansion retains 430x475; movement updates the anchor; MainWindow.SaveGeometry commits moved baseline bounds to its preview session.");
+        }
+        finally { window.Close(); }
+    }
+
+    private sealed class BaselineHost : IPanelHost
+    {
+        public Rect Bounds = new Rect(1170, 18, 430, 475);
+        public int SetCalls;
+        public Rect GetBounds() { return Bounds; }
+        public void SetBounds(Rect bounds) { Bounds = bounds; SetCalls++; }
+        public Rect WorkArea() { return new Rect(0, 0, 2560, 1528); }
     }
 
     private static void ValidateLegacyUtcEditor()
@@ -240,16 +269,27 @@ internal static class OffscreenUiTests
                 "Legacy UTC deadline does not display the local clock time.");
             Field<TextBox>(textOnly, "taskText").Text = "仅修改文字，保留原截止精度";
             SaveUnshownEditor(textOnly);
-            TodoItem saved = textOnly.Result;
-            Assert(saved != null && saved.Text == "仅修改文字，保留原截止精度", "Text-only editor save failed.");
-            Assert(saved.DueDate.Ticks == original.DueDate.Ticks, "Text-only edit changed seconds or subsecond precision.");
-            Assert(saved.DueDate.Kind == DateTimeKind.Utc, "Text-only edit changed the UTC deadline kind.");
+            TaskDraft draft = textOnly.Result;
+            Assert(draft != null && draft.Text == "仅修改文字，保留原截止精度", "Text-only editor did not produce the expected draft.");
+            Assert(draft.DueDate.Ticks == original.DueDate.Ticks, "Text-only draft changed seconds or subsecond precision.");
+            Assert(draft.DueDate.Kind == DateTimeKind.Utc, "Text-only draft changed the UTC deadline kind.");
+            Assert(draft.HasTime == original.HasTime, "Text-only draft changed the deadline precision mode.");
+            string isolatedData = Path.Combine(outputDirectory, "isolated-data", "editor-text-only");
+            TodoState state = new TodoState(); state.Items.Add(original);
+            TodoSession session = new TodoSession(new TodoStore(isolatedData), state, true);
+            session.Edit(original.Id, draft);
+            TodoItem saved = session.Snapshot().Items.Single(item => item.Id == original.Id);
+            Assert(saved.Text == draft.Text && saved.DueDate.Ticks == original.DueDate.Ticks && saved.DueDate.Kind == original.DueDate.Kind,
+                "Committing a text-only draft changed its text or exact deadline.");
             Assert(saved.DeadlineSetAt.HasValue &&
                 saved.DeadlineSetAt.Value.Ticks == original.DeadlineSetAt.Value.Ticks &&
                 saved.DeadlineSetAt.Value.Kind == original.DeadlineSetAt.Value.Kind,
-                "Text-only edit restarted the original scheduling interval.");
-            Assert(saved.Id == original.Id && saved.CreatedAt == original.CreatedAt,
-                "Text-only edit changed task identity or creation time.");
+                "Committing a text-only draft restarted the original scheduling interval.");
+            Assert(saved.Id == original.Id && saved.CreatedAt == original.CreatedAt && saved.CreatedAt.Kind == original.CreatedAt.Kind,
+                "Committing a text-only draft changed task identity or creation time.");
+            Assert(saved.IsCompleted == original.IsCompleted && saved.CompletedAt == original.CompletedAt,
+                "Committing a text-only draft changed completion state.");
+            Assert(!Directory.Exists(isolatedData), "A preview session wrote editor data files.");
             Assert(new WindowInteropHelper(textOnly).Handle == IntPtr.Zero,
                 "Text-only editor regression unexpectedly created an HWND.");
         }
@@ -259,27 +299,38 @@ internal static class OffscreenUiTests
         try
         {
             Field<TextBox>(deadlineEdit, "time").Text = local.AddMinutes(1).ToString("HH:mm");
-            DateTime before = DateTime.Now;
             SaveUnshownEditor(deadlineEdit);
-            DateTime after = DateTime.Now;
-            TodoItem saved = deadlineEdit.Result;
+            TaskDraft draft = deadlineEdit.Result;
             DateTime expected = local.Date.AddHours(local.Hour).AddMinutes(local.Minute + 1);
-            Assert(saved != null && TodoRules.Deadline(saved).Ticks == expected.Ticks,
-                "A real minute edit did not update the effective deadline.");
-            Assert(saved.DueDate.Second == 0 && saved.DueDate.Ticks % TimeSpan.TicksPerSecond == 0,
-                "A changed minute should use the minute-precision value supplied by the editor.");
+            Assert(draft != null && draft.DueDate.Ticks == expected.Ticks && draft.HasTime,
+                "A real minute edit did not produce the entered local deadline draft.");
+            Assert(draft.DueDate.Second == 0 && draft.DueDate.Ticks % TimeSpan.TicksPerSecond == 0,
+                "A changed minute draft should use the minute precision supplied by the editor.");
+            string isolatedData = Path.Combine(outputDirectory, "isolated-data", "editor-minute-edit");
+            TodoState state = new TodoState(); state.Items.Add(original);
+            TodoSession session = new TodoSession(new TodoStore(isolatedData), state, true);
+            DateTime before = DateTime.Now;
+            session.Edit(original.Id, draft);
+            DateTime after = DateTime.Now;
+            TodoItem saved = session.Snapshot().Items.Single(item => item.Id == original.Id);
+            Assert(TodoRules.Deadline(saved).Ticks == expected.Ticks,
+                "Committing a minute-change draft did not update the effective deadline.");
             Assert(saved.DeadlineSetAt.HasValue && saved.DeadlineSetAt.Value >= before &&
                 saved.DeadlineSetAt.Value <= after && saved.DeadlineSetAt.Value.Kind == DateTimeKind.Local,
-                "A real deadline edit did not reset DeadlineSetAt to the save time.");
+                "Committing a real deadline edit did not reset DeadlineSetAt to the session save time.");
             Assert(saved.DeadlineSetAt.Value.Ticks != original.DeadlineSetAt.Value.Ticks,
                 "A real deadline edit kept the old scheduling interval.");
+            Assert(saved.Id == original.Id && saved.CreatedAt == original.CreatedAt && saved.CreatedAt.Kind == original.CreatedAt.Kind &&
+                saved.IsCompleted == original.IsCompleted && saved.CompletedAt == original.CompletedAt,
+                "Committing a changed deadline altered identity, creation time or completion state.");
             Assert(original.DueDate.Second == 29 && original.DueDate.Kind == DateTimeKind.Utc,
-                "Saving the editor mutated the original task.");
+                "Preparing or committing a draft mutated the original task.");
+            Assert(!Directory.Exists(isolatedData), "A preview session wrote changed-deadline data files.");
             Assert(new WindowInteropHelper(deadlineEdit).Handle == IntPtr.Zero,
                 "Deadline editor regression unexpectedly created an HWND.");
         }
         finally { deadlineEdit.Close(); }
-        Report.AppendLine("editor UTC regression: local date/time display, text-only tick/Kind/DeadlineSetAt preservation, and genuine minute-change scheduling reset passed.");
+        Report.AppendLine("editor/session UTC regression: local date/time display, exact draft mapping, text-only identity/timing preservation, genuine minute-change scheduling reset, and preview without writes passed.");
     }
 
     private static void SaveUnshownEditor(TaskEditor editor)
@@ -322,10 +373,6 @@ internal static class OffscreenUiTests
     private static T Field<T>(object instance, string name)
     {
         return (T)instance.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(instance);
-    }
-    private static void SetField(object instance, string name, object value)
-    {
-        instance.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(instance, value);
     }
     private static object Invoke(object instance, string name)
     {

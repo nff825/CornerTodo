@@ -152,7 +152,7 @@ internal static class AppearanceUiTests
         try
         {
             RenderWindow(window, "dark-attention.png", true);
-            List<TextBlock> texts = Descendants(Field<Border>(window, "surface")).OfType<TextBlock>().ToList();
+            List<TextBlock> texts = Descendants(window.Panel.Surface).OfType<TextBlock>().ToList();
             foreach (TodoItem item in state.Items.Where(t => t.Id == "sample-urgent" || t.Id == "sample-overdue"))
             {
                 TextBlock text = texts.Single(t => t.Text == item.Text);
@@ -160,7 +160,7 @@ internal static class AppearanceUiTests
                 Assert(text.FontWeight == FontWeights.SemiBold, "Attention emphasis was lost after a theme change.");
                 SolidColorBrush foreground = text.Foreground as SolidColorBrush;
                 Assert(foreground != null && foreground.Color.A == 255, "Attention text was faded by background transparency.");
-                Grid row = Descendants(Field<Border>(window, "surface")).OfType<Grid>().Single(g => Object.Equals(g.Tag, item.Id));
+                Grid row = Descendants(window.Panel.Surface).OfType<Grid>().Single(g => Object.Equals(g.Tag, item.Id));
                 TextBlock due = Descendants(row).OfType<TextBlock>().Single(t => t != text);
                 Assert(due.Text.Contains(item.Id == "sample-urgent" ? "剩余" : "已逾期"), "Attention status disappeared after a theme change.");
             }
@@ -225,16 +225,20 @@ internal static class AppearanceUiTests
             Invoke(window, "CancelAppearancePreview");
             CheckPanel(window, saved);
 
-            TodoState clone = (TodoState)Invoke(window, "Clone");
-            Assert(StateWithoutAppearance(clone) == unchanged, "Cloning lost task or geometry fields.");
-            Assert(!Object.ReferenceEquals(clone.Settings.Appearance, window.CurrentState.Settings.Appearance), "A model clone shares appearance settings.");
+            TodoState clone = window.CurrentState;
+            Assert(StateWithoutAppearance(clone) == unchanged, "A current-state snapshot lost task or geometry fields.");
+            Assert(!Object.ReferenceEquals(clone.Settings.Appearance, window.CurrentState.Settings.Appearance), "A current-state snapshot shares appearance settings.");
             clone.Settings.Appearance.BackgroundColor = "#010203";
-            Assert(window.CurrentState.Settings.Appearance.Matches(saved), "Changing a clone mutated the committed appearance.");
+            clone.Settings.Width = 1;
+            clone.Items[0].Text = "snapshot-only edit";
+            clone.Items.Clear();
+            Assert(window.CurrentState.Settings.Appearance.Matches(saved), "Changing a snapshot mutated the committed appearance.");
+            Assert(StateWithoutAppearance(window.CurrentState) == unchanged, "Changing a snapshot mutated committed tasks or baseline geometry.");
             RenderWindow(window, "saved-dark.png", true);
             AssertNoHandle(window);
         }
         finally { window.Close(); }
-        Report.AppendLine("Persistence: preview and restore leave bytes unchanged; save persists an independent value; locked-file failure rolls back display/model/disk; tasks and baseline fields survive clones.");
+        Report.AppendLine("Persistence: preview and restore leave bytes unchanged; save persists an independent value; locked-file failure rolls back display/model/disk; current-state snapshots isolate tasks, appearance and baseline fields.");
     }
 
     private static void ValidateEditorInteractions()
@@ -330,7 +334,7 @@ internal static class AppearanceUiTests
         // ScrollViewer templates are lazy on an unshown window. Lay out the
         // real subtree before inspecting task rows; do not create an HWND.
         RenderWindow(window, null, true);
-        Border surface = Field<Border>(window, "surface");
+        Border surface = window.Panel.Surface;
         SolidColorBrush fill = surface.Background as SolidColorBrush;
         Assert(fill != null, "The panel fill is not a solid color brush.");
         Color color = ParseColor(expected.BackgroundColor);
@@ -343,7 +347,7 @@ internal static class AppearanceUiTests
         TextBlock pending = texts.Single(t => t.Text == "向李老师汇报研究进展");
         CheckTextColor(pending, expected.PrimaryTextColor, "Primary task color");
         CheckTextColor(texts.Single(t => t.Text == "待办清单"), expected.PrimaryTextColor, "Title color");
-        CheckTextColor(Field<TextBlock>(window, "dateText"), expected.SecondaryTextColor, "Secondary date color");
+        CheckTextColor(window.Panel.DateText, expected.SecondaryTextColor, "Secondary date color");
         Near(1, pending.Opacity, "Pending text opacity");
         foreach (UIElement ancestor in Ancestors(pending).OfType<UIElement>())
             Near(1, ancestor.Opacity, "Pending text ancestor opacity");
@@ -352,7 +356,7 @@ internal static class AppearanceUiTests
     private static Dictionary<string, string> TextAppearance(MainWindow window)
     {
         RenderWindow(window, null, true);
-        List<TextBlock> texts = Descendants(Field<Border>(window, "surface")).OfType<TextBlock>().ToList();
+        List<TextBlock> texts = Descendants(window.Panel.Surface).OfType<TextBlock>().ToList();
         Dictionary<string, string> values = new Dictionary<string, string>();
         for (int i = 0; i < texts.Count; i++)
         {
@@ -469,13 +473,6 @@ internal static class AppearanceUiTests
     {
         DependencyObject current = child;
         while ((current = VisualTreeHelper.GetParent(current)) != null) yield return current;
-    }
-
-    private static T Field<T>(object instance, string name)
-    {
-        FieldInfo field = instance.GetType().GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (field == null) throw new InvalidOperationException("Missing test field: " + name);
-        return (T)field.GetValue(instance);
     }
 
     private static object Invoke(object instance, string name, params object[] arguments)

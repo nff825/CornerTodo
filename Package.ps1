@@ -6,12 +6,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectDirectory = [System.IO.Path]::GetFullPath($PSScriptRoot)
+. (Join-Path $projectDirectory 'build/Common.ps1')
+$definition = Get-CornerTodoBuildDefinition -ProjectDirectory $projectDirectory
 $recordedVersion = [System.IO.File]::ReadAllText((Join-Path $projectDirectory 'VERSION')).Trim()
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = $recordedVersion }
 if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Version -ne $recordedVersion) {
     throw 'Version must match the three-part version recorded in VERSION.'
 }
-$metadata = [System.IO.File]::ReadAllText((Join-Path $projectDirectory 'AssemblyInfo.cs'))
+$metadata = [System.IO.File]::ReadAllText((Resolve-CornerTodoPath $projectDirectory $definition.Properties.AssemblyInfoFile))
 if ($metadata -notmatch ('AssemblyFileVersion\("' + [regex]::Escape($Version) + '\.0"\)')) {
     throw 'AssemblyInfo.cs and VERSION do not match.'
 }
@@ -26,26 +28,9 @@ if (-not $outputDirectoryPath.StartsWith($projectPrefix, [System.StringCompariso
 [void][System.IO.Directory]::CreateDirectory($outputDirectoryPath)
 $outputPrefix = $outputDirectoryPath + '\'
 
-# Explicit source allowlist. Never package the working directory or live dist.
-$sourceFiles = @(
-    '.gitignore', '.gitattributes', 'LICENSE', 'VERSION', 'README.md', 'CHANGELOG.md',
-    'AssemblyInfo.cs', 'Build.ps1', 'Package.ps1', 'app.manifest', 'CornerTodo.exe.config',
-    'AppearanceSettings.cs', 'AppearanceEditor.cs',
-    'DesktopHost.cs', 'Diagnostics.cs', 'GrowthLayout.cs', 'MainWindow.cs', 'Models.cs',
-    'Program.cs', 'StartupManager.cs', 'LaunchOptions.cs', 'TaskEditor.cs', 'Theme.cs', 'TodoStore.cs',
-    'tests/StoreTests.cs', 'tests/Run-StoreTests.ps1',
-    'tests/GrowthLayoutTests.cs', 'tests/Run-GrowthLayoutTests.ps1',
-    'tests/OffscreenUiTests.cs', 'tests/Run-OffscreenUiTests.ps1', 'tests/Inspect-Windows.ps1',
-    'tests/AppearanceUiTests.cs', 'tests/Run-AppearanceUiTests.ps1',
-    'tests/StartupTests.cs', 'tests/LaunchOptionsTests.cs', 'tests/StartupUiTests.cs', 'tests/Run-StartupTests.ps1',
-    'docs/PUBLISHING.md', 'docs/PORTABLE-README.txt', 'docs/RELEASE_NOTES.md', 'docs/STARTUP.md',
-    'docs/images/normal.png', 'docs/images/urgent.png', 'docs/images/overdue.png'
-)
-foreach ($relativePath in $sourceFiles) {
-    if (-not (Test-Path -LiteralPath (Join-Path $projectDirectory $relativePath) -PathType Leaf)) {
-        throw ('A required public source file is missing: ' + $relativePath)
-    }
-}
+# The same explicit source declarations feed the project, compiler and public archive.
+# Documentation and test helpers remain explicitly allowed; never enumerate a live dist.
+$sourceFiles = @(Get-CornerTodoPublicSourceFiles -Definition $definition)
 
 function Copy-SourceFiles([string]$From, [string]$To) {
     foreach ($relativePath in $sourceFiles) {
@@ -143,7 +128,7 @@ try {
     [System.IO.File]::WriteAllLines((Join-Path $workDirectory 'SHA256SUMS.txt'), [string[]]$checksums, $utf8)
     $report = @(
         ('CornerTodo v' + $Version),
-        'Clean public source build and all five test suites: PASS',
+        ('Clean public source build and all ' + $definition.TestSuites.Count + ' functional test suites: PASS'),
         ('Source archive allowlist and per-file hashes: PASS (' + $sourceFiles.Count + ' files)'),
         ('Portable archive allowlist and per-file hashes: PASS (' + $portableFiles.Count + ' files)'),
         ('Executable file version: ' + $fileVersion),

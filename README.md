@@ -4,7 +4,9 @@
 
 ![CornerTodo 常态面板，图中内容为示例事项](docs/images/normal.png)
 
-本文以拟发布版本 **v1.2.0** 为例。可下载版本以本仓库的 **Releases** 页面为准。
+当前版本为 **v1.2.1**。可下载文件以本仓库的 **Releases** 页面为准。
+
+v1.2.1 整理了工程与代码结构，并完善异常恢复和退出清理。更新内容见 [更新记录](CHANGELOG.md)，开发者可从 [架构与构建说明](docs/DEVELOPMENT.md) 了解各组件的职责。
 
 ## 功能
 
@@ -20,9 +22,9 @@
 
 ## 下载与运行
 
-在仓库的 **Releases** 中下载 `CornerTodo-v1.2.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
+在仓库的 **Releases** 中下载 `CornerTodo-v1.2.1-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
 
-`CornerTodo-v1.2.0-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
+`CornerTodo-v1.2.1-source.zip` 是源码包，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用程序请选择名称含 `windows-portable` 的压缩包。
 
 系统目标为 **Windows 10 / 11，.NET Framework 4.7.2 或更新版本**。应用使用 C# / WPF 与 Windows 自带的框架库，没有第三方运行时依赖。桌面层显示会受到 Explorer、其他桌面工具、多显示器和缩放配置的影响，尚未保证所有环境组合的兼容性；无法连接桌面层时会提示并以普通窗口显示。
 
@@ -70,29 +72,43 @@
 
 ## 从源码构建
 
-在 Windows 上使用系统的 Windows PowerShell 和 .NET Framework C# 编译器。无需另装 .NET SDK 或下载 NuGet 包。在项目根目录运行：
+项目提供脚本和 Visual Studio／MSBuild 两种开发入口，共用 `CornerTodo.Build.props` 中的显式源码、框架引用、测试元数据和公开文件白名单。生产源码按职责放在 `src/App`、`src/Tasks`、`src/UI`、`src/Windows`；工程和构建入口保留在根目录，仍编译为同一个 WPF 应用。详细说明见 [开发工程说明](docs/DEVELOPMENT.md)。
+
+脚本构建使用 Windows PowerShell 和系统的 .NET Framework C# 编译器，无需另装 .NET SDK 或下载 NuGet 包。在项目根目录运行：
 
 ```powershell
 powershell -NoProfile -File .\Build.ps1
 ```
 
-输出为 `dist\CornerTodo.exe`，需保留同目录的 `CornerTodo.exe.config`。构建脚本也会生成应用图标。需要构建并执行全部测试时运行：
+默认输出为 `dist\CornerTodo.exe`，需保留同目录的 `CornerTodo.exe.config`。构建脚本也会生成应用图标。开发时建议指定独立输出目录，避免覆盖正在使用的程序；同时执行测试可运行：
 
 ```powershell
-powershell -NoProfile -File .\Build.ps1 -Test
+powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory dist-dev
 ```
 
-五类测试也可单独运行：
+此时程序输出位于 `dist-dev`，原有 `dist\Data` 不参与该构建。构建不会自动启动程序、开启登录自启动或上传发布文件。
+
+需要在 IDE 中阅读和调试时，打开 `CornerTodo.sln`。这是 **.NET Framework 4.7.2、C# 5、AnyCPU** 的传统 WPF 工程，开发环境需要相应的 Visual Studio／MSBuild 和 4.7.2 Targeting Pack。IDE 构建输出为 `bin\Debug` 或 `bin\Release`，不覆盖 `dist`；直接运行便携版不需要安装这些开发工具。
+
+共享清单目前登记十一组功能测试，也可单独运行：
 
 | 测试 | 命令 | 范围 |
 | --- | --- | --- |
 | 数据与截止规则 | `powershell -NoProfile -File .\tests\Run-StoreTests.ps1` | 保存、恢复、排序、截止边界、紧迫程度与设置兼容 |
+| 任务操作服务（Session） | `powershell -NoProfile -File .\tests\Run-SessionTests.ps1` | 命令与时间戳规则、保存失败不提交、快照隔离、预览无写盘；不创建 WPF 窗口 |
 | 增长布局 | `powershell -NoProfile -File .\tests\Run-GrowthLayoutTests.ps1` | 尺寸上限、锚点、屏幕边界、DPI 与异常输入 |
+| 面板交互控制器（Panel） | `powershell -NoProfile -File .\tests\Run-PanelTests.ps1` | 假屏幕宿主、可控时钟下的拖动、调整大小、增长动画及基准尺寸；不挂载桌面 |
+| 面板视图（View） | `powershell -NoProfile -File .\tests\Run-ViewTests.ps1` | 控件树、事项呈现及操作意图转发；不显示窗口 |
 | WPF 离屏界面 | `powershell -NoProfile -File .\tests\Run-OffscreenUiTests.ps1` | 示例界面布局与渲染，结果写入 `tests\visual-qa` |
 | 外观设置界面 | `powershell -NoProfile -File .\tests\Run-AppearanceUiTests.ps1` | 背景透明度、主题预览／保存／回滚、编辑器交互，结果写入 `tests\appearance-qa` |
-| 登录自启动 | `powershell -NoProfile -File .\tests\Run-StartupTests.ps1` | 登录参数、受管快捷方式登记／关闭／更新、重复启动及菜单行为，使用隔离测试环境 |
+| 登录自启动 | `powershell -NoProfile -File .\tests\Run-StartupTests.ps1` | 登录参数、受管快捷方式登记／关闭／更新及菜单行为，使用隔离测试环境 |
+| 单实例通信（Instance） | `powershell -NoProfile -File .\tests\Run-InstanceTests.ps1` | 独立命名空间内的实例身份、手动唤醒、自动重复静默及释放，不启动正式应用 |
+| 桌面挂载调度（Desktop） | `powershell -NoProfile -File .\tests\Run-DesktopTests.ps1` | 假桌面适配器下的首次挂载、重试、句柄丢失及关闭后的回调清理 |
+| 应用生命周期（Lifecycle） | `powershell -NoProfile -File .\tests\Run-LifecycleTests.ps1` | 假窗口与手动调度下的关闭、恢复、模态保护、最新快照及过期回调 |
 
-离屏测试覆盖界面渲染，实际桌面显示仍需在目标 Windows 环境中检查。真实登录回归由使用者在方便时手动进行；测试不会注销或重启电脑。
+界面呈现、面板交互、任务保存与应用生命周期分别由视图、控制器和服务负责；具体边界见 [开发工程说明](docs/DEVELOPMENT.md)。离屏渲染和假宿主测试不覆盖实际桌面的鼠标／键盘输入、原生桌面层组合、Explorer 重启及真实登录，仍需在目标 Windows 环境中检查。测试不会注销或重启电脑。
+
+修改工程、共享清单、构建或打包流程时，还应单独运行 `powershell -NoProfile -File .\tests\Run-BuildTests.ps1`。这项深度构建回归在隔离副本中检查源码清单、源码移动与干净打包，不包含在共享清单登记的功能测试组中；详见开发说明。
 
 ## 预览与测试参数
 
@@ -108,19 +124,19 @@ powershell -NoProfile -File .\Build.ps1 -Test
 
 ## 打包与发布
 
-维护者可运行下面的命令。脚本会从源码白名单建立干净副本，在副本中构建并运行五类测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
+维护者可运行下面的命令。脚本会从公开源码清单建立干净副本，在副本中构建并运行现有测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.2.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.2.1 -OutputDirectory release\v1.2.1
 ```
 
-产物位于 `release`：
+产物位于 `release\v1.2.1`：
 
-- `CornerTodo-v1.2.0-source.zip`
-- `CornerTodo-v1.2.0-windows-portable.zip`
+- `CornerTodo-v1.2.1-source.zip`
+- `CornerTodo-v1.2.1-windows-portable.zip`
 - `SHA256SUMS.txt`
 
-`release\CornerTodo-v1.2.0-source` 保留干净的源码展开目录，可直接将其中的内容上传到 GitHub。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
+`release\v1.2.1\CornerTodo-v1.2.1-source` 保留包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。更新已有仓库时，还需移除原根目录的旧生产 `.cs` 路径，再创建版本标签。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
 
 ## 许可证
 
