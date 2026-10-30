@@ -20,11 +20,12 @@ internal static class TaskEditorTests
     {
         checks = 0;
         DefaultsAndEntryPoints();
+        TimePickerSelectionAndTyping();
         SaveDraftAndPreserveInput();
         ValidationAndClearing();
         PersistenceFailureAndRetry();
         CancelAndSmallLayout();
-        Console.WriteLine("PASS: task editor notes/priority behaviors, " + checks + " checks (unshown WPF windows).");
+        Console.WriteLine("PASS: task editor time-picker/notes/priority behaviors, " + checks + " checks (unshown WPF windows).");
     }
 
     private static TodoItem Fixture()
@@ -48,9 +49,17 @@ internal static class TaskEditorTests
             Assert(host.Find<Button>("取消编辑待办").IsCancel, "Escape should remain available through the cancel button.");
             KeyBinding shortcut = editor.InputBindings.OfType<KeyBinding>().Single(binding => binding.Command == ApplicationCommands.Save);
             Assert(shortcut.Key == Key.Enter && shortcut.Modifiers == ModifierKeys.Control, "Ctrl+Enter save gesture was lost.");
-            Assert(!host.Find<TextBox>("截止时刻，24小时制").IsEnabled, "An untimed task should not enable time editing.");
+            ComboBox hour = host.Find<ComboBox>("截止小时，24小时制"); ComboBox minute = host.Find<ComboBox>("截止分钟");
+            Assert(!hour.IsEnabled && !minute.IsEnabled, "An untimed task should not enable either time field.");
+            Assert(hour.Text == "18" && minute.Text == "00", "New task time should retain the existing 18:00 default.");
+            Assert(hour.IsEditable && minute.IsEditable, "Both time fields must support keyboard entry as well as point selection.");
+            Assert(hour.Items.Count == 24 && hour.Items[0].Equals("00") && hour.Items[23].Equals("23"), "Hour choices must cover the full 24-hour clock.");
+            Assert(minute.Items.Count == 60 && minute.Items[0].Equals("00") && minute.Items[23].Equals("23") && minute.Items[59].Equals("59"),
+                "Minute choices must include arbitrary minutes, rather than only five-minute intervals.");
             host.Find<CheckBox>("设置具体时刻").IsChecked = true;
-            Assert(host.Find<TextBox>("截止时刻，24小时制").IsEnabled, "Checking specific time did not enable its field.");
+            Assert(hour.IsEnabled && minute.IsEnabled, "Checking specific time did not enable both fields.");
+            host.Find<CheckBox>("设置具体时刻").IsChecked = false;
+            Assert(!hour.IsEnabled && !minute.IsEnabled, "Clearing specific time did not disable both fields.");
             host.Find<Expander>("展开或收起备注").IsExpanded = true;
             host.Layout();
             Assert(host.Find<TextBox>("备注，选填").ActualHeight > 0, "Expanding notes should expose its text box.");
@@ -60,11 +69,86 @@ internal static class TaskEditorTests
             Assert(host.Find<Expander>("展开或收起备注").IsExpanded, "Existing notes should expand automatically.");
             Assert(host.Find<TextBox>("备注，选填").Text == item.Notes, "Existing multiline notes were changed while loading.");
             Assert(host.Find<RadioButton>("优先级：高").IsChecked == true, "Existing priority was not restored.");
+            DateTime local = item.DueDate.ToLocalTime();
+            Assert(host.Find<ComboBox>("截止小时，24小时制").Text == local.ToString("HH") && host.Find<ComboBox>("截止分钟").Text == local.ToString("mm"),
+                "Time selectors did not restore the existing local deadline.");
         });
         item.Notes = "";
         WithEditor(item, true, delegate(TaskEditor editor, LayoutHost host) {
             Assert(host.Find<Expander>("展开或收起备注").IsExpanded, "The notes entry point should expand even empty notes.");
             Assert(FocusManager.GetFocusedElement(editor) == host.Find<TextBox>("备注，选填"), "Notes entry point lost its initial logical focus.");
+        });
+    }
+
+    private static void TimePickerSelectionAndTyping()
+    {
+        foreach (int[] parts in new[] { new[] { 0, 0 }, new[] { 23, 59 }, new[] { 17, 23 } })
+        {
+            WithEditor(null, false, delegate(TaskEditor editor, LayoutHost host) {
+                host.Find<TextBox>("待办事项").Text = "点选截止时刻";
+                host.Find<DatePicker>("截止日期").SelectedDate = new DateTime(2026, 11, 3);
+                host.Find<CheckBox>("设置具体时刻").IsChecked = true;
+                host.Find<ComboBox>("截止小时，24小时制").SelectedItem = parts[0].ToString("00", CultureInfo.InvariantCulture);
+                host.Find<ComboBox>("截止分钟").SelectedItem = parts[1].ToString("00", CultureInfo.InvariantCulture);
+                host.Layout(); Click(host.Find<Button>("保存待办"), true);
+                Assert(editor.Result != null && editor.Result.HasTime && editor.Result.DueDate == new DateTime(2026, 11, 3, parts[0], parts[1], 0),
+                    "Selecting hour/minute did not save the intended exact minute.");
+            });
+        }
+        WithEditor(null, false, delegate(TaskEditor editor, LayoutHost host) {
+            host.Find<TextBox>("待办事项").Text = "键盘填写时刻";
+            host.Find<DatePicker>("截止日期").SelectedDate = new DateTime(2026, 11, 3);
+            host.Find<CheckBox>("设置具体时刻").IsChecked = true;
+            ComboBox hour = host.Find<ComboBox>("截止小时，24小时制"); ComboBox minute = host.Find<ComboBox>("截止分钟");
+            hour.Text = "7"; minute.Text = "3";
+            Click(host.Find<Button>("保存待办"), true);
+            Assert(editor.Result != null && editor.Result.DueDate == new DateTime(2026, 11, 3, 7, 3, 0), "Keyboard entry did not save the intended hour/minute.");
+            Assert(hour.Text == "07" && minute.Text == "03", "Valid keyboard input should normalize to two-digit fields.");
+        });
+        int persistenceCalls = 0;
+        WithEditor(null, false, delegate(TaskDraft draft) { persistenceCalls++; return true; }, delegate(TaskEditor editor, LayoutHost host) {
+            host.Find<TextBox>("待办事项").Text = "无效时刻不应保存";
+            host.Find<TextBox>("备注，选填").Text = "输入必须保留";
+            host.Find<CheckBox>("设置具体时刻").IsChecked = true;
+            ComboBox hour = host.Find<ComboBox>("截止小时，24小时制"); ComboBox minute = host.Find<ComboBox>("截止分钟");
+            foreach (string[] parts in new[] {
+                new[] { "24", "00" }, new[] { "-1", "00" }, new[] { "+1", "00" }, new[] { "1.5", "00" },
+                new[] { "", "00" }, new[] { "1700", "00" }, new[] { "17:00", "00" },
+                new[] { "17", "60" }, new[] { "17", "-1" }, new[] { "17", "1.5" }, new[] { "17", "" }
+            })
+            {
+                hour.Text = parts[0]; minute.Text = parts[1];
+                Click(host.Find<Button>("保存待办"), false);
+                Assert(editor.Result == null && persistenceCalls == 0 && host.Find<TextBlock>("待办编辑错误提示").Text.Contains("时刻"),
+                    "Invalid hour/minute input reached persistence or lacked a visible error: " + parts[0] + ":" + parts[1]);
+                Assert(hour.Text == parts[0] && minute.Text == parts[1] && host.Find<TextBox>("备注，选填").Text == "输入必须保留",
+                    "Validation changed the user's time fields or notes.");
+            }
+        });
+        TodoItem original = Fixture();
+        WithEditor(original, false, delegate(TaskEditor editor, LayoutHost host) {
+            DateTime local = original.DueDate.ToLocalTime();
+            host.Find<ComboBox>("截止小时，24小时制").SelectedIndex = local.Hour;
+            host.Find<ComboBox>("截止分钟").SelectedIndex = local.Minute;
+            Click(host.Find<Button>("保存待办"), true);
+            Assert(editor.Result != null && editor.Result.DueDate == original.DueDate && editor.Result.DueDate.Kind == original.DueDate.Kind,
+                "Re-selecting the same clock time lost stored seconds, ticks or UTC kind.");
+        });
+        WithEditor(original, false, delegate(TaskEditor editor, LayoutHost host) {
+            host.Find<ComboBox>("截止小时，24小时制").Text = "invalid";
+            host.Find<CheckBox>("设置具体时刻").IsChecked = false;
+            Click(host.Find<Button>("保存待办"), true);
+            Assert(editor.Result != null && !editor.Result.HasTime && editor.Result.DueDate == original.DueDate.ToLocalTime().Date,
+                "Clearing specific time should ignore disabled fields and save the local date only.");
+        });
+        WithEditor(null, false, delegate(TaskEditor editor, LayoutHost host) {
+            host.Width = 320; host.Height = 300; host.Layout();
+            host.Find<CheckBox>("设置具体时刻").IsChecked = true;
+            ComboBox hour = host.Find<ComboBox>("截止小时，24小时制"); ComboBox minute = host.Find<ComboBox>("截止分钟");
+            hour.BringIntoView(); host.Layout();
+            ScrollViewer body = host.Find<ScrollViewer>("待办编辑内容");
+            Assert(Fits(hour, body) && Fits(minute, body), "Small editors must keep both clock fields visible together after scrolling to their row.");
+            Assert(Fits(host.Find<Button>("保存待办"), host.Canvas), "Scrolling to the clock fields displaced the fixed save action.");
         });
     }
 
@@ -108,10 +192,12 @@ internal static class TaskEditorTests
             Assert(editor.Result == null && host.Find<TextBlock>("待办编辑错误提示").Text.Contains("日期"), "Empty date should not produce a draft.");
             host.Find<DatePicker>("截止日期").Text = "2026年11月03日";
             host.Find<CheckBox>("设置具体时刻").IsChecked = true;
-            host.Find<TextBox>("截止时刻，24小时制").Text = "24:00";
+            host.Find<ComboBox>("截止小时，24小时制").Text = "24";
+            host.Find<ComboBox>("截止分钟").Text = "00";
             Click(host.Find<Button>("保存待办"), false);
             Assert(editor.Result == null && host.Find<TextBlock>("待办编辑错误提示").Text.Contains("时刻"), "Invalid time should not produce a draft.");
-            host.Find<TextBox>("截止时刻，24小时制").Text = "09:30";
+            host.Find<ComboBox>("截止小时，24小时制").Text = "09";
+            host.Find<ComboBox>("截止分钟").Text = "30";
             Click(host.Find<Button>("保存待办"), true);
             Assert(editor.Result != null && editor.Result.HasTime && editor.Result.DueDate == new DateTime(2026, 11, 3, 9, 30, 0),
                 "Correcting validation errors should allow saving the intended deadline.");
@@ -167,11 +253,15 @@ internal static class TaskEditorTests
                 Assert(calls == 0, "Invalid editor data must not reach the persistence callback.");
                 title.Text = "失败后保留的事项"; notes.Text = "第一行\r\n需要保留的详细说明";
                 host.Find<RadioButton>("优先级：低").IsChecked = true;
+                host.Find<ComboBox>("截止小时，24小时制").Text = "17";
+                host.Find<ComboBox>("截止分钟").Text = "23";
                 Click(host.Find<Button>("保存待办"), false);
                 Assert(calls == 1 && editor.Result == null, "A failed save must not close or publish the draft.");
                 Assert(title.Text == "失败后保留的事项" && notes.Text == "第一行\r\n需要保留的详细说明" && host.Find<RadioButton>("优先级：低").IsChecked == true,
                     "A failed save discarded editable title, notes or priority.");
                 Assert(host.Find<TextBlock>("待办编辑错误提示").Text.Contains("输入仍保留"), "A failed save should explain that input is retained.");
+                Assert(host.Find<ComboBox>("截止小时，24小时制").Text == "17" && host.Find<ComboBox>("截止分钟").Text == "23",
+                    "A failed save discarded the selected clock time.");
                 Assert(ItemValue(item) == before, "A failed persistence attempt mutated the supplied task.");
                 Click(host.Find<Button>("保存待办"), true);
                 Assert(calls == 2 && editor.Result != null, "Retry should invoke persistence exactly once and publish on success.");

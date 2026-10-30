@@ -169,6 +169,7 @@ namespace CornerTodo
                         { "Collapsed", settings.Collapsed },
                         { "CompletedCollapsed", settings.CompletedCollapsed },
                         { "AutoExpand", settings.AutoExpand },
+                        { "EdgeAutoHide", settings.EdgeAutoHide },
                         { "SortMode", (int)settings.SortMode },
                         { "Appearance", new Dictionary<string, object>
                             {
@@ -229,6 +230,9 @@ namespace CornerTodo
                 state.Settings.Collapsed = Boolean(settings, "Collapsed", false);
                 state.Settings.CompletedCollapsed = Boolean(settings, "CompletedCollapsed", false);
                 state.Settings.AutoExpand = Boolean(settings, "AutoExpand", true);
+                // An optional display preference must not discard otherwise valid
+                // tasks. Old, missing or malformed values keep auto-hide disabled.
+                state.Settings.EdgeAutoHide = settings.TryGetValue("EdgeAutoHide", out value) && value is bool && (bool)value;
                 state.Settings.SortMode = settings.TryGetValue("SortMode", out value) && value is int && Enum.IsDefined(typeof(TaskSortMode), value)
                     ? (TaskSortMode)(int)value : TaskSortMode.Deadline;
                 if (settings.TryGetValue("Appearance", out value))

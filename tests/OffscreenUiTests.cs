@@ -45,6 +45,7 @@ internal static class OffscreenUiTests
             ValidateBaselineSave();
             ValidateLegacyUtcEditor();
             ValidateSortPersistence();
+            EdgeUiTests.Run(outputDirectory);
             Report.AppendLine("PASS: " + assertions + " assertions across 3 rendered scenarios.");
             Report.AppendLine("Scope: control tree, layout, typography, counts, completed decoration, settings state, render pixels and fake-host baseline persistence.");
             Report.AppendLine("Live desktop z-order, animations and native input are intentionally outside this offscreen check.");
@@ -312,7 +313,8 @@ internal static class OffscreenUiTests
         {
             Assert(Field<DatePicker>(textOnly, "date").SelectedDate == local.Date,
                 "Legacy UTC deadline does not display the local calendar date.");
-            Assert(Field<TextBox>(textOnly, "time").Text == local.ToString("HH:mm"),
+            Assert(Field<ComboBox>(textOnly, "hour").Text == local.ToString("HH") &&
+                Field<ComboBox>(textOnly, "minute").Text == local.ToString("mm"),
                 "Legacy UTC deadline does not display the local clock time.");
             Field<TextBox>(textOnly, "taskText").Text = "仅修改文字，保留原截止精度";
             SaveUnshownEditor(textOnly);
@@ -345,7 +347,8 @@ internal static class OffscreenUiTests
         TaskEditor deadlineEdit = new TaskEditor(original);
         try
         {
-            Field<TextBox>(deadlineEdit, "time").Text = local.AddMinutes(1).ToString("HH:mm");
+            Field<ComboBox>(deadlineEdit, "hour").Text = local.AddMinutes(1).ToString("HH");
+            Field<ComboBox>(deadlineEdit, "minute").Text = local.AddMinutes(1).ToString("mm");
             SaveUnshownEditor(deadlineEdit);
             TaskDraft draft = deadlineEdit.Result;
             DateTime expected = local.Date.AddHours(local.Hour).AddMinutes(local.Minute + 1);

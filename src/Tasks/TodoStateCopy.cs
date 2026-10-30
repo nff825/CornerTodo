@@ -17,7 +17,8 @@ namespace CornerTodo
                 Settings = new WidgetSettings {
                     Left = settings.Left, Top = settings.Top, Width = settings.Width, Height = settings.Height,
                     Collapsed = settings.Collapsed, CompletedCollapsed = settings.CompletedCollapsed,
-                    AutoExpand = settings.AutoExpand, Appearance = AppearanceSettings.Normalize(settings.Appearance), SortMode = settings.SortMode
+                    AutoExpand = settings.AutoExpand, EdgeAutoHide = settings.EdgeAutoHide,
+                    Appearance = AppearanceSettings.Normalize(settings.Appearance), SortMode = settings.SortMode
                 }
             };
         }

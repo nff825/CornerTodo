@@ -13,7 +13,8 @@ namespace CornerTodo
         private readonly TextBox taskText;
         private readonly DatePicker date;
         private readonly CheckBox useTime;
-        private readonly TextBox time;
+        private readonly ComboBox hour;
+        private readonly ComboBox minute;
         private readonly TextBox notes;
         private readonly Expander notesSection;
         private readonly TextBlock notesCount;
@@ -73,13 +74,16 @@ namespace CornerTodo
             var timeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
             useTime = new CheckBox { Content = "设置具体时刻", IsChecked = item != null && item.HasTime, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(useTime, "设置具体时刻");
-            time = new TextBox { Text = item != null && item.HasTime ? displayedDue.ToString("HH:mm") : "18:00", Width = 72,
-                MaxLength = 5, Padding = new Thickness(7, 5, 7, 5), Margin = new Thickness(14, 0, 0, 0),
-                IsEnabled = useTime.IsChecked == true, BorderBrush = Theme.Brush("#BDD0D8") };
-            AutomationProperties.SetName(time, "截止时刻，24小时制");
-            useTime.Checked += delegate { time.IsEnabled = true; };
-            useTime.Unchecked += delegate { time.IsEnabled = false; };
-            timeRow.Children.Add(useTime); timeRow.Children.Add(time); fields.Children.Add(timeRow);
+            hour = TimePart(24, item != null && item.HasTime ? displayedDue.Hour : 18, "截止小时，24小时制");
+            minute = TimePart(60, item != null && item.HasTime ? displayedDue.Minute : 0, "截止分钟");
+            hour.Margin = new Thickness(14, 0, 0, 0);
+            hour.IsEnabled = minute.IsEnabled = useTime.IsChecked == true;
+            useTime.Checked += delegate { hour.IsEnabled = minute.IsEnabled = true; };
+            useTime.Unchecked += delegate { hour.IsEnabled = minute.IsEnabled = false; };
+            var separator = Theme.Text(":", 15, Theme.Ink); separator.Width = 14;
+            separator.TextAlignment = TextAlignment.Center; separator.VerticalAlignment = VerticalAlignment.Center;
+            timeRow.Children.Add(useTime); timeRow.Children.Add(hour); timeRow.Children.Add(separator); timeRow.Children.Add(minute);
+            fields.Children.Add(timeRow);
             var priorityLabel = Theme.Text("优先级", 13, Theme.Muted); priorityLabel.Margin = new Thickness(0, 16, 0, 7); fields.Children.Add(priorityLabel);
             var priorities = new Grid();
             for (int i = 0; i < 3; i++) priorities.ColumnDefinitions.Add(new ColumnDefinition());
@@ -131,6 +135,27 @@ namespace CornerTodo
 
         private static void Add(Grid grid, UIElement element, int row) { Grid.SetRow(element, row); grid.Children.Add(element); }
 
+        private static ComboBox TimePart(int count, int selected, string name)
+        {
+            var input = new ComboBox { Width = 60, IsEditable = true, IsTextSearchEnabled = false,
+                StaysOpenOnEdit = true, MaxDropDownHeight = 180, Padding = new Thickness(6, 5, 3, 5),
+                Background = Brushes.White, BorderBrush = Theme.Brush("#BDD0D8"), Foreground = Theme.Ink,
+                VerticalContentAlignment = VerticalAlignment.Center };
+            for (int value = 0; value < count; value++) input.Items.Add(value.ToString("00", CultureInfo.InvariantCulture));
+            input.SelectedIndex = selected;
+            AutomationProperties.SetName(input, name);
+            return input;
+        }
+
+        private static bool TryTimePart(ComboBox input, int maximum, out int value)
+        {
+            string text = input.Text.Trim(); value = 0;
+            if (text.Length < 1 || text.Length > 2) return false;
+            for (int index = 0; index < text.Length; index++)
+                if (text[index] < '0' || text[index] > '9') return false;
+            return Int32.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value <= maximum;
+        }
+
         private static RadioButton PriorityOption(string label, TaskPriority priority, Style style)
         {
             var option = new RadioButton { Content = label, Tag = priority, GroupName = "task-priority", Style = style,
@@ -165,10 +190,14 @@ namespace CornerTodo
             DateTime due = selected.Date;
             if (useTime.IsChecked == true)
             {
-                TimeSpan value;
-                if (!TimeSpan.TryParseExact(time.Text.Trim(), new[] { @"h\:mm", @"hh\:mm" }, CultureInfo.InvariantCulture, out value) || value.TotalHours >= 24)
-                { error.Text = "请按 09:30 的格式填写时刻（00:00–23:59）。"; time.Focus(); return; }
-                due = due.Add(value);
+                int selectedHour, selectedMinute;
+                if (!TryTimePart(hour, 23, out selectedHour))
+                { error.Text = "请选择或填写有效时刻：小时为00–23。"; hour.Focus(); return; }
+                if (!TryTimePart(minute, 59, out selectedMinute))
+                { error.Text = "请选择或填写有效时刻：分钟为00–59。"; minute.Focus(); return; }
+                hour.Text = selectedHour.ToString("00", CultureInfo.InvariantCulture);
+                minute.Text = selectedMinute.ToString("00", CultureInfo.InvariantCulture);
+                due = due.AddHours(selectedHour).AddMinutes(selectedMinute);
             }
             // Keep the original precision and time kind when the visible deadline
             // fields were not changed, including legacy deadlines with seconds.

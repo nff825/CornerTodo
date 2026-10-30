@@ -26,6 +26,8 @@ internal static class StoreTests
             Run("Unrecoverable JSON remains available and produces a warning", UnrecoverableJson);
             Run("Missing main data recovers the backup", MissingMainRecovery);
             Run("Missing settings use compatible defaults", SettingsCompatibility);
+            Run("Optional edge auto-hide is disabled for old or malformed preferences without rewriting tasks", EdgeHideCompatibility);
+            Run("Edge auto-hide saves and reloads independently of tasks and expanded geometry", EdgeHideRoundTrip);
             Run("Semantically invalid tasks are preserved rather than discarded", InvalidTaskIsNotDropped);
             Run("Date-only and exact-time overdue boundaries are correct", DeadlineBoundaries);
             Run("Pending order uses the effective deadline; completed order uses completion time", Ordering);
@@ -106,6 +108,7 @@ internal static class StoreTests
         Assert(state.Version == 1 && state.Items.Count == 0, "Default state is invalid.");
         Assert(state.Settings.Width == 430 && state.Settings.Height == 475 && !state.Settings.Collapsed, "Default geometry is invalid.");
         Assert(state.Settings.Left == null && state.Settings.Top == null, "First-run position should be unset.");
+        Assert(!state.Settings.EdgeAutoHide, "Edge auto-hide must be opt-in on first launch.");
         Assert(store.LoadWarning == null && !File.Exists(store.DataFilePath), "First load should not write data or warn.");
     }
 
@@ -227,6 +230,61 @@ internal static class StoreTests
         TodoState state = store.Load();
         Assert(state.Version == 1 && state.Settings.Width == 430 && state.Settings.Height == 475 && !state.Settings.Collapsed, "Missing optional fields did not use defaults.");
         Assert(state.Settings.Left == -400 && state.Settings.Top == 20 && store.LoadWarning == null, "Existing optional settings were not preserved.");
+        Assert(!state.Settings.EdgeAutoHide, "An older settings document silently enabled edge auto-hide.");
+    }
+
+    private static void EdgeHideCompatibility()
+    {
+        string[] values = { null, "false", "true", "null", "\"true\"", "1", "[]", "{}" };
+        for (int i = 0; i < values.Length; i++)
+        {
+            TodoStore store = Store("edge-hide-compatibility-" + i);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            string settings = "{\"Left\":12.25,\"Top\":55.75,\"Width\":460,\"Height\":530,\"AutoExpand\":false,\"SortMode\":1"
+                + (values[i] == null ? "" : ",\"EdgeAutoHide\":" + values[i]) + "}";
+            string json = AppearanceDocument(settings);
+            File.WriteAllText(store.DataFilePath, json, Encoding.UTF8);
+            byte[] original = File.ReadAllBytes(store.DataFilePath);
+            TodoState loaded = store.Load();
+            Assert(loaded.Settings.EdgeAutoHide == (values[i] == "true"), "Missing or malformed display preference was enabled, or true was lost.");
+            Assert(loaded.Settings.Width == 460 && loaded.Settings.Height == 530 && loaded.Settings.Left == 12.25
+                && loaded.Settings.Top == 55.75 && !loaded.Settings.AutoExpand && loaded.Settings.SortMode == TaskSortMode.Priority,
+                "Reading edge auto-hide changed unrelated preferences or expanded geometry.");
+            AssertAppearanceTask(loaded);
+            Assert(store.LoadWarning == null, "An optional edge preference marked valid tasks as damaged.");
+            Assert(original.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Loading an edge preference rewrote the saved document.");
+            Assert(Directory.GetFiles(Path.GetDirectoryName(store.DataFilePath), "*.corrupt-*").Length == 0, "Valid tasks were unnecessarily archived as corrupt.");
+        }
+    }
+
+    private static void EdgeHideRoundTrip()
+    {
+        TodoStore store = Store("edge-hide-round-trip");
+        TodoState state = State("贴边开关不能修改任务内容");
+        state.Items[0].Notes = "保留备注\n第二行"; state.Items[0].Priority = TaskPriority.High;
+        state.Items[0].DeadlineSetAt = state.Items[0].CreatedAt.AddHours(1).AddTicks(1234);
+        state.Settings.Left = 111.25; state.Settings.Top = 55.75;
+        state.Settings.Width = 490; state.Settings.Height = 610;
+        state.Settings.SortMode = TaskSortMode.Priority; state.Settings.Appearance = AppearanceSettings.CreateDark();
+        foreach (bool enabled in new[] { true, false, true })
+        {
+            state.Settings.EdgeAutoHide = enabled;
+            store.Save(state);
+            var restarted = new TodoStore(Path.GetDirectoryName(store.DataFilePath));
+            TodoState loaded = restarted.Load(); TodoItem item = loaded.Items.Single();
+            Assert(loaded.Settings.EdgeAutoHide == enabled && restarted.LoadWarning == null, "The selected edge auto-hide preference did not survive restart.");
+            Assert(loaded.Settings.Left == 111.25 && loaded.Settings.Top == 55.75 && loaded.Settings.Width == 490
+                && loaded.Settings.Height == 610 && loaded.Settings.AutoExpand && !loaded.Settings.Collapsed
+                && loaded.Settings.SortMode == TaskSortMode.Priority && loaded.Settings.Appearance.Matches(state.Settings.Appearance),
+                "Saving auto-hide replaced expanded geometry or other settings.");
+            Assert(item.Id == state.Items[0].Id && item.Text == state.Items[0].Text && item.Notes == state.Items[0].Notes
+                && item.Priority == TaskPriority.High && item.CreatedAt == state.Items[0].CreatedAt && item.DueDate == state.Items[0].DueDate
+                && item.DeadlineSetAt == state.Items[0].DeadlineSetAt && !item.IsCompleted && !item.HasTime,
+                "Changing edge auto-hide altered task details, status or scheduling.");
+            string saved = File.ReadAllText(store.DataFilePath, Encoding.UTF8);
+            Assert(saved.Contains("\"EdgeAutoHide\":" + (enabled ? "true" : "false")), "The persisted preference was not a JSON Boolean.");
+            Assert(!saved.Contains("\"EdgeHidden\"") && !saved.Contains("\"Docked\""), "Transient capsule state leaked into persisted settings.");
+        }
     }
 
     private static void InvalidTaskIsNotDropped()

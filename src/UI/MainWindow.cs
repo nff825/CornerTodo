@@ -50,7 +50,8 @@ namespace CornerTodo
                 startupManager ?? new UnavailableStartupManager(null), panelHost, new ApplicationInteraction()) { }
 
         internal MainWindow(TodoStore store, TodoSession session, bool windowed, bool preview,
-            IStartupManager startupManager, IPanelHost panelHost, ApplicationInteraction applicationInteraction)
+            IStartupManager startupManager, IPanelHost panelHost, ApplicationInteraction applicationInteraction,
+            Func<DateTime> panelClock = null)
         {
             this.store = store; this.windowed = windowed; this.preview = preview;
             if (session == null) throw new ArgumentNullException("session");
@@ -66,7 +67,7 @@ namespace CornerTodo
             FontFamily = new FontFamily("Microsoft YaHei UI"); Foreground = Theme.Ink;
             UseLayoutRounding = true; SnapsToDevicePixels = true;
             panel = new TodoPanelView(new TodoViewActions {
-                Add = delegate { Edit(null); }, ToggleCollapsed = TogglePanel, ShowMenu = ShowMenu,
+                Add = delegate { Edit(null); }, ToggleCollapsed = TogglePanel, ShowMenu = ShowMenu, RevealFromEdge = RevealFromEdge,
                 ToggleCompletedSection = delegate {
                     Execute(delegate { session.SetCompletedCollapsed(!this.state.Settings.CompletedCollapsed); }, "保存失败，修改尚未保存。", true);
                 },
@@ -82,7 +83,8 @@ namespace CornerTodo
             Content = panel.Surface;
             interaction = new PanelController(this, panel.Header, panel.Grip, panelHost ?? new DesktopPanelHost(this),
                 delegate { return menuOpen || dialogOpen || applicationInteraction.IsBusy; },
-                delegate { return HostLost; }, ScheduleSave, ResumeAttention);
+                delegate { return HostLost; }, ScheduleSave, ResumeAttention, panelClock ?? delegate { return DateTime.UtcNow; });
+            interaction.EdgeHiddenChanged += EdgeHiddenChanged;
             saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
             saveTimer.Tick += delegate { saveTimer.Stop(); SaveGeometry(); };
             refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
@@ -141,7 +143,9 @@ namespace CornerTodo
             disposed = true;
             Loaded -= LoadedWindow; Closed -= ClosedWindow;
             desktopAttachment.HandleLost -= DesktopHandleLost;
-            desktopAttachment.Dispose(); interaction.Dispose();
+            desktopAttachment.Dispose();
+            interaction.EdgeHiddenChanged -= EdgeHiddenChanged;
+            interaction.Dispose();
             saveTimer.Stop(); refreshTimer.Stop();
             if (resumeOperation != null) { resumeOperation.Abort(); resumeOperation = null; }
         }
@@ -171,6 +175,23 @@ namespace CornerTodo
             menu.PlacementTarget = panel.MoreButton; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true;
         }
 
+        private void EdgeHiddenChanged(bool hidden) { if (!disposed) panel.SetEdgeHidden(hidden); }
+
+        private void RevealFromEdge()
+        {
+            if (disposed || HostLost || !interaction.IsEdgeHidden) return;
+            interaction.RevealFromEdge(GrowthProgress(), state.Settings.Collapsed);
+        }
+
+        internal bool TrySetEdgeAutoHide(bool enabled)
+        {
+            if (disposed || HostLost) return false;
+            if (!Execute(delegate { session.SetEdgeAutoHide(enabled); }, "贴边收起设置未保存。", false)) return false;
+            interaction.SetEdgeAutoHide(enabled);
+            Render();
+            return true;
+        }
+
         private ContextMenu BuildMenu()
         {
             var menu = new ContextMenu();
@@ -185,6 +206,7 @@ namespace CornerTodo
             menu.Opened += delegate {
                 foreach (var menuItem in menu.Items.OfType<MenuItem>()) {
                     if (Object.Equals(menuItem.Tag, "auto-expand")) menuItem.IsChecked = state.Settings.AutoExpand;
+                    if (Object.Equals(menuItem.Tag, "edge-auto-hide")) menuItem.IsChecked = state.Settings.EdgeAutoHide;
                     if (Object.Equals(menuItem.Tag, "completed-toggle")) menuItem.Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成";
                 }
                 RefreshStartupMenu(loginStartup, repairStartup);
@@ -204,10 +226,17 @@ namespace CornerTodo
                     UpdateExpansion(true, true);
             };
             menu.Items.Add(automatic);
+            var edgeAutoHide = new MenuItem { Header = "贴边自动收起", IsCheckable = true,
+                IsChecked = state.Settings.EdgeAutoHide, Tag = "edge-auto-hide",
+                ToolTip = "默认关闭。开启后拖至主屏右侧贴边；鼠标离开后收起，点击胶囊展开。" };
+            edgeAutoHide.Click += delegate {
+                if (!TrySetEdgeAutoHide(edgeAutoHide.IsChecked)) edgeAutoHide.IsChecked = state.Settings.EdgeAutoHide;
+            };
+            menu.Items.Add(edgeAutoHide);
             menu.Items.Add(loginStartup); menu.Items.Add(repairStartup);
             var reset = new MenuItem { Header = "恢复右上角位置" }; reset.Click += delegate { ResetPosition(); }; menu.Items.Add(reset);
             var help = new MenuItem { Header = "使用说明" }; help.Click += delegate {
-                ShowModal("点击圆圈切换完成状态；双击事项或右键编辑。\n有备注的事项显示备注图标，点击即可查看或修改。\n细线表示已用时间，鼠标悬停可看百分比；满格表示到期，不代表完成。\n优先级可选高、中、低；列表顶部可切换截止时间优先或优先级优先。\n拖动标题调整位置；关闭菜单中的‘随截止时间扩大’后，可调整常态大小。\n紧急事项：距截止不超过6小时；逾期事项持续保持最大面板。\n自动扩展以右上角为锚点，最大占桌面宽度的一半、高度约72%。\n仅日期的事项到当天结束后才逾期。\n开机自启默认关闭，可在菜单自行开启，仅当前账号登录后启动。\n退出仅关闭本次运行；移动程序后请更新自启位置。\n\n数据自动保存在：\n" + store.DataFilePath, "桌面待办", MessageBoxButton.OK, MessageBoxImage.Information, MessageBoxResult.OK);
+                ShowModal("点击圆圈切换完成状态；双击事项或右键编辑。\n有备注的事项显示备注图标，点击即可查看或修改。\n具体时刻可分别点选小时和分钟，也支持键盘输入，使用24小时制。\n细线表示已用时间，鼠标悬停可看百分比；满格表示到期，不代表完成。\n优先级可选高、中、低；列表顶部可切换截止时间优先或优先级优先。\n拖动标题调整位置；关闭菜单中的‘随截止时间扩大’后，可调整常态大小。\n贴边自动收起默认关闭：开启后拖至主屏右侧，鼠标离开后收起。\n点击胶囊展开；编辑或菜单打开时不收起；拖离边缘可取消贴边。\n收起期间到期不会自动弹出；展开后按当前紧急程度计算大小。\n胶囊仍只在桌面显示，可通过‘恢复右上角位置’或再次双击程序找回。\n紧急事项：距截止不超过6小时；逾期事项展开时保持最大面板。\n自动扩展以右上角为锚点，最大占桌面宽度的一半、高度约72%。\n仅日期的事项到当天结束后才逾期。\n开机自启默认关闭，可在菜单自行开启，仅当前账号登录后启动。\n退出仅关闭本次运行；移动程序后请更新自启位置。\n\n数据自动保存在：\n" + store.DataFilePath, "桌面待办", MessageBoxButton.OK, MessageBoxImage.Information, MessageBoxResult.OK);
             }; menu.Items.Add(help);
             menu.Items.Add(new Separator()); var quit = new MenuItem { Header = "退出待办" }; quit.Click += delegate { applicationInteraction.RequestExit(); }; menu.Items.Add(quit);
             TrackMenu(menu); return menu;
@@ -259,6 +288,7 @@ namespace CornerTodo
         {
             if (disposed || applicationInteraction.IsBusy) return;
             applicationInteraction.EditorOpen = true; interaction.StopAnimation();
+            RevealFromEdge();
             try
             {
                 var editor = new TaskEditor(item, focusNotes, delegate(TaskDraft draft) {
@@ -290,6 +320,7 @@ namespace CornerTodo
         {
             if (disposed || applicationInteraction.IsBusy) return;
             applicationInteraction.EditorOpen = true; interaction.StopAnimation();
+            RevealFromEdge();
             try {
                 var editor = new AppearanceEditor(state.Settings.Appearance, PreviewAppearance, TrySaveAppearance);
                 Rect area = DesktopHost.WorkArea(this);
@@ -382,7 +413,7 @@ namespace CornerTodo
 
         private void TrackMenu(ContextMenu menu)
         {
-            menu.Opened += delegate { menuOpen = true; interaction.StopAnimation(); };
+            menu.Opened += delegate { menuOpen = true; interaction.StopAnimation(); RevealFromEdge(); };
             menu.Closed += delegate { menuOpen = false; ResumeAttention(); };
         }
 

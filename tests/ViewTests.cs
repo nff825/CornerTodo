@@ -37,6 +37,7 @@ internal static class ViewTests
             Run("Notes entry and compact priority labels preserve task state", NotesAndPriorityProjection);
             Run("Sort selection requests and failed-save rollback", SortRequests);
             Run("Thin elapsed-time bars, hover detail and completed visibility", TimeProgressProjection);
+            Run("Edge capsule counts, palette, reveal requests and restored panel", EdgeCapsuleProjection);
             Assert(application.Windows.Count == 0, "View tests unexpectedly created a Window.");
             TaskEditorTests.Run();
             Console.WriteLine("PASS: " + groups + " view behavior groups, " + checks + " checks.");
@@ -52,7 +53,7 @@ internal static class ViewTests
     {
         internal bool AcceptCompletion;
         internal bool AcceptSort;
-        internal int Adds, Collapses, Menus, CompletedSections;
+        internal int Adds, Collapses, Menus, CompletedSections, EdgeReveals;
         internal readonly List<Tuple<string, bool>> Completion = new List<Tuple<string, bool>>();
         internal readonly List<string> Edits = new List<string>();
         internal readonly List<string> Deletes = new List<string>();
@@ -64,6 +65,7 @@ internal static class ViewTests
             return new TodoViewActions {
                 Add = delegate { Adds++; }, ToggleCollapsed = delegate { Collapses++; },
                 ShowMenu = delegate { Menus++; }, ToggleCompletedSection = delegate { CompletedSections++; },
+                RevealFromEdge = delegate { EdgeReveals++; },
                 SetCompleted = delegate(TodoItem item, bool target) { Completion.Add(Tuple.Create(item.Id, target)); return AcceptCompletion; },
                 Edit = delegate(TodoItem item) { Edits.Add(item.Id); }, Delete = delegate(TodoItem item) { Deletes.Add(item.Id); },
                 EditNotes = delegate(TodoItem item) { Notes.Add(item.Id); },
@@ -291,6 +293,37 @@ internal static class ViewTests
         Assert(!Descendants(Row(view, "done")).OfType<Grid>().Any(grid => Object.Equals(grid.Tag, "time-progress")), "Completed row displayed a time bar after repaint.");
     }
 
+    private static void EdgeCapsuleProjection()
+    {
+        TodoState state = Fixture(); string before = StateValue(state);
+        Requests requests = new Requests(); TodoPanelView view = CreateView(requests, state);
+        Assert(view.Surface.Child == view.Root, "Default view unexpectedly displayed the edge capsule.");
+        view.SetEdgeHidden(true); Layout(view, 48, 152);
+        Assert(view.Surface.Child == view.EdgeButton && view.Root.Parent == null, "Hidden view retained full-size content in its layout.");
+        string label = AutomationProperties.GetName(view.EdgeButton);
+        Assert(label.Contains("未完成 3 项") && label.Contains("其中逾期 1 项"), "Capsule counts duplicated overdue tasks or included completed tasks.");
+        Assert(!view.EdgeButton.Focusable, "Capsule click can retain keyboard focus and prevent auto-hide.");
+        Click(view.EdgeButton);
+        Assert(requests.EdgeReveals == 1 && view.Surface.Child == view.EdgeButton, "Capsule should request reveal, not own display state.");
+        Rect target = view.EdgeButton.TransformToAncestor(view.Surface).TransformBounds(new Rect(new Point(), view.EdgeButton.RenderSize));
+        Assert(target.Left >= 0 && target.Right <= 48.1 && target.Top >= 0 && target.Bottom <= 152.1, "Capsule click target escaped its small bounds.");
+        AppearanceSettings transparent = AppearanceSettings.CreateLight(); transparent.BackgroundTransparency = 100;
+        view.Render(state, Now, false, transparent); Layout(view, 48, 152);
+        Assert(view.Surface.Child == view.EdgeButton && ((SolidColorBrush)view.Surface.Background).Color.A >= 230,
+            "Refreshing or making the panel transparent hid or expanded its capsule.");
+        Assert(((SolidColorBrush)view.Palette.Ink).Color.A == 255, "Capsule text became transparent.");
+        view.Render(state, Now, false, AppearanceSettings.CreateDark()); Layout(view, 48, 152);
+        Assert(view.Surface.Child == view.EdgeButton && Texts(view).Any(text => text.Text == "3"), "Dark palette lost the capsule or its count.");
+        view.SetEdgeHidden(false); Layout(view, 430, 620);
+        Assert(view.Surface.Child == view.Root && view.Surface.Padding.Left == 19, "Reveal did not restore normal panel layout and padding.");
+        Assert(Rows(view).Count() == 4 && StateValue(state) == before, "Edge projection changed tasks, their order or settings.");
+        TodoState empty = new TodoState(); view.Render(empty, Now, false, null); view.SetEdgeHidden(true); Layout(view, 48, 152);
+        Assert(AutomationProperties.GetName(view.EdgeButton).Contains("未完成 0 项，其中逾期 0 项"), "Empty capsule does not explain its zero state.");
+        view.SetEdgeHidden(false); view.Render(state, Now, false, null); state.Settings.Collapsed = true;
+        view.Render(state, Now, false, null); view.SetEdgeHidden(true); view.SetEdgeHidden(false);
+        Assert(view.Scroll.Visibility == Visibility.Collapsed && view.CollapseButton.Content.ToString() == "⌄", "Edge reveal changed the user's separate manual collapse state.");
+    }
+
     private static Grid Layout(TodoPanelView view, double width, double height)
     {
         Grid host = VisualTreeHelper.GetParent(view.Surface) as Grid;
@@ -323,7 +356,7 @@ internal static class ViewTests
     {
         StringBuilder value = new StringBuilder(); WidgetSettings settings = state.Settings;
         value.Append(state.Version).Append('|').Append(settings.Left).Append('|').Append(settings.Top).Append('|').Append(settings.Width).Append('|').Append(settings.Height)
-            .Append('|').Append(settings.AutoExpand).Append('|').Append(settings.Collapsed).Append('|').Append(settings.CompletedCollapsed).Append('|').Append(settings.SortMode);
+            .Append('|').Append(settings.AutoExpand).Append('|').Append(settings.EdgeAutoHide).Append('|').Append(settings.Collapsed).Append('|').Append(settings.CompletedCollapsed).Append('|').Append(settings.SortMode);
         AppearanceSettings appearance = settings.Appearance;
         value.Append('|').Append(appearance.BackgroundTransparency).Append('|').Append(appearance.BackgroundColor).Append('|').Append(appearance.PrimaryTextColor).Append('|').Append(appearance.SecondaryTextColor);
         foreach (TodoItem item in state.Items) value.Append('|').Append(item.Id).Append('|').Append(item.Text).Append('|').Append(item.Notes).Append('|').Append(item.Priority).Append('|').Append(item.IsCompleted).Append('|').Append(item.HasTime)

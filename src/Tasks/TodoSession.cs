@@ -95,6 +95,12 @@ namespace CornerTodo
             Change(delegate(TodoState next) { next.Settings.AutoExpand = enabled; });
         }
 
+        public void SetEdgeAutoHide(bool enabled)
+        {
+            if (current.Settings.EdgeAutoHide == enabled) return;
+            Change(delegate(TodoState next) { next.Settings.EdgeAutoHide = enabled; });
+        }
+
         public void SetSortMode(TaskSortMode mode)
         {
             if (!Enum.IsDefined(typeof(TaskSortMode), mode)) throw new ArgumentException("请选择有效的排序方式。", "mode");

@@ -36,6 +36,7 @@ internal static class SessionTests
             Run("Notes and priority preserve scheduling through edits, completion and restoration", DetailsLifecycle);
             Run("Task detail validation rejects excessive notes and invalid ranks without committing", DetailsValidation);
             Run("Sort preference changes are isolated, idempotent and survive restart", SortPreference);
+            Run("Edge auto-hide is opt-in, transactional, isolated and persistent", EdgeHidePreference);
             Run("Only an effective deadline change resets full-interval time progress", TimeProgressReschedule);
             Console.WriteLine("PASS: " + passed + " session behavior tests.");
             Console.WriteLine("No WPF, production Data or Windows startup registration is used.");
@@ -292,6 +293,7 @@ internal static class SessionTests
             delegate(TodoSession s) { s.SetAppearance(AppearanceSettings.CreateDark()); },
             delegate(TodoSession s) { s.SetCompletedCollapsed(false); },
             delegate(TodoSession s) { s.SetAutoExpand(false); },
+            delegate(TodoSession s) { s.SetEdgeAutoHide(true); },
             delegate(TodoSession s) { s.SetCollapsed(true); },
             delegate(TodoSession s) { s.SaveGeometry(100, 50, 500, 600); },
             delegate(TodoSession s) { s.SetSortMode(TaskSortMode.Priority); }
@@ -327,6 +329,8 @@ internal static class SessionTests
         Equal(expected, session.Snapshot(), "Completed-region setting changed unrelated data");
         session.SetAutoExpand(false); expected.Settings.AutoExpand = false;
         Equal(expected, session.Snapshot(), "Auto-expand setting changed unrelated data");
+        session.SetEdgeAutoHide(true); expected.Settings.EdgeAutoHide = true;
+        Equal(expected, session.Snapshot(), "Edge auto-hide changed tasks, schedule or expanded geometry");
         session.SetSortMode(TaskSortMode.Priority); expected.Settings.SortMode = TaskSortMode.Priority;
         Equal(expected, session.Snapshot(), "Sorting changed unrelated data");
         session.SetCollapsed(true); expected.Settings.Collapsed = true;
@@ -344,9 +348,10 @@ internal static class SessionTests
         TodoItem added = session.Add(Draft("示例新增"));
         session.Edit(added.Id, Draft("示例编辑")); session.SetCompleted(added.Id, true); session.SetCompleted(added.Id, false);
         session.SetAppearance(AppearanceSettings.CreateDark()); session.SetCompletedCollapsed(false);
-        session.SetAutoExpand(false); session.SetCollapsed(true); session.SetSortMode(TaskSortMode.Priority); session.SaveGeometry(100, 50, 500, 600); session.Delete(added.Id);
+        session.SetAutoExpand(false); session.SetEdgeAutoHide(true); session.SetCollapsed(true); session.SetSortMode(TaskSortMode.Priority); session.SaveGeometry(100, 50, 500, 600); session.Delete(added.Id);
         Assert(writer.Arguments.Count == 0, "Preview wrote to persistent storage.");
-        Assert(session.Snapshot().Settings.Collapsed && !session.Snapshot().Settings.AutoExpand && session.Snapshot().Settings.Appearance.Matches(AppearanceSettings.CreateDark()),
+        Assert(session.Snapshot().Settings.Collapsed && !session.Snapshot().Settings.AutoExpand && session.Snapshot().Settings.EdgeAutoHide
+            && session.Snapshot().Settings.Appearance.Matches(AppearanceSettings.CreateDark()),
             "Preview failed to update its own isolated state.");
         Equal(Fixture(), original, "Preview changed its supplied original state");
     }
@@ -435,6 +440,40 @@ internal static class SessionTests
         Equal(expected, store.Load(), "Sort preference did not survive a real store restart.");
         session.SetSortMode(TaskSortMode.Deadline);
         Equal(Fixture(), session.Snapshot(), "Returning to deadline sort lost original state.");
+    }
+
+    private static void EdgeHidePreference()
+    {
+        var writer = new RecordingStore();
+        var session = new TodoSession(writer, Fixture(), false, delegate { return Epoch; });
+        Assert(!session.Snapshot().Settings.EdgeAutoHide, "Edge auto-hide was enabled without user choice.");
+        session.SetEdgeAutoHide(false);
+        Assert(writer.Arguments.Count == 0, "Selecting the default disabled preference unnecessarily saved data.");
+        session.SetEdgeAutoHide(true);
+        TodoState expected = Fixture(); expected.Settings.EdgeAutoHide = true;
+        Equal(expected, session.Snapshot(), "Enabling edge auto-hide changed tasks or expanded geometry.");
+        TodoState snapshot = session.Snapshot(); snapshot.Settings.EdgeAutoHide = false;
+        writer.Arguments.Last().Settings.EdgeAutoHide = false;
+        Equal(expected, session.Snapshot(), "An external snapshot or retained save argument changed auto-hide.");
+        session.SetEdgeAutoHide(true);
+        Assert(writer.Arguments.Count == 1, "Selecting the active enabled preference created an extra save.");
+        writer.DuringSave = delegate(TodoState received) {
+            received.Settings.EdgeAutoHide = false; received.Settings.Width = 48; received.Settings.Height = 152;
+            throw new IOException("fixture preference save failure");
+        };
+        ExpectSaveFailure(delegate { session.SetEdgeAutoHide(false); });
+        Equal(expected, session.Snapshot(), "Failed disabling committed a preference or temporary capsule dimensions.");
+        writer.DuringSave = null;
+        session.SetEdgeAutoHide(false);
+        Equal(Fixture(), session.Snapshot(), "Retrying disable lost original task or geometry state.");
+        Assert(writer.Arguments.Count == 3, "Failed disabling could not be retried exactly once.");
+        session.SetEdgeAutoHide(true);
+        var store = new TodoStore(Path.Combine(temporaryRoot, "edge-hide-restart"));
+        store.Save(session.Snapshot());
+        var restarted = new TodoSession(store, store.Load(), false, delegate { return Epoch; });
+        Equal(expected, restarted.Snapshot(), "Restart lost enabled auto-hide or changed unrelated state.");
+        restarted.SetEdgeAutoHide(false);
+        Equal(Fixture(), store.Load(), "Disabling auto-hide was not persisted through a real store.");
     }
 
     private static void TimeProgressReschedule()

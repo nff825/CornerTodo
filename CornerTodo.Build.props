@@ -73,6 +73,7 @@
     <CornerTodoTestSource Include="tests/ViewTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/TaskEditorTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/OffscreenUiTests.cs"><Suite>OffscreenUi</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/EdgeUiTests.cs"><Suite>OffscreenUi</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/AppearanceUiTests.cs"><Suite>AppearanceUi</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/StartupTests.cs"><Suite>Startup</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/LaunchOptionsTests.cs"><Suite>Startup</Suite></CornerTodoTestSource>
@@ -111,5 +112,8 @@
     <CornerTodoPublicFile Include="docs/images/notes-editor.png" />
     <CornerTodoPublicFile Include="docs/images/dark.png" />
     <CornerTodoPublicFile Include="docs/images/appearance-editor.png" />
+    <CornerTodoPublicFile Include="docs/images/time-picker.png" />
+    <CornerTodoPublicFile Include="docs/images/edge-expanded.png" />
+    <CornerTodoPublicFile Include="docs/images/edge-capsule.png" />
   </ItemGroup>
 </Project>

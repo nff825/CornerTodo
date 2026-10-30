@@ -1,0 +1,39 @@
+# Build output and local release bundles
+/dist*/
+/release/
+/output/
+/archive/
+[Bb]in/
+[Oo]bj/
+*.exe
+*.dll
+*.pdb
+*.zip
+
+# Personal tasks, backups, and runtime diagnostics at any depth
+[Dd]ata/
+todos*.json*
+*.log
+*.log.*
+*.bak
+*.corrupt-*
+*.tmp
+
+# Test output and a local-only recovery helper
+/tests/ui-validation/
+/tests/visual-qa/
+/tests/appearance-qa/
+/tests/CornerTodo-*TestBuild-*/
+/tests/Preserve-ValidationTasks.ps1
+
+# Local editor and agent settings
+.vs/
+.idea/
+.codex/
+.agents/
+*.user
+*.suo
+*.sln.docstates
+Thumbs.db
+Desktop.ini
+.DS_Store

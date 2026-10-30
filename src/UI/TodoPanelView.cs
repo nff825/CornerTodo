@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -14,6 +15,7 @@ namespace CornerTodo
         public Action Add { get; set; }
         public Action ToggleCollapsed { get; set; }
         public Action ShowMenu { get; set; }
+        public Action RevealFromEdge { get; set; }
         public Action ToggleCompletedSection { get; set; }
         public Func<TodoItem, bool, bool> SetCompleted { get; set; }
         public Action<TodoItem> Edit { get; set; }
@@ -27,6 +29,11 @@ namespace CornerTodo
     internal sealed class TodoPanelView
     {
         private readonly TaskListView taskList;
+        private readonly TextBlock edgePending;
+        private readonly TextBlock edgeOverdue;
+        private readonly Border edgeSeparator;
+        private bool edgeHidden;
+        internal Button EdgeButton { get; private set; }
         internal Border Surface { get; private set; }
         internal Grid Root { get; private set; }
         internal Grid Header { get; private set; }
@@ -86,6 +93,19 @@ namespace CornerTodo
             Grid.SetRow(footer, 2); Root.Children.Add(footer);
             StatusText = Theme.Text("", 11, Theme.Warning); StatusText.Visibility = Visibility.Collapsed; StatusText.Margin = new Thickness(0, 5, 0, 0);
             Grid.SetRow(StatusText, 3); Root.Children.Add(StatusText);
+            var edgeContent = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var edgeLabel = Theme.Text("待办", 12, Palette.Ink); edgeLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            edgePending = Theme.Text("0", 24, Palette.Ink); edgePending.HorizontalAlignment = HorizontalAlignment.Center;
+            edgePending.FontWeight = FontWeights.SemiBold; edgePending.Margin = new Thickness(0, 4, 0, 5);
+            edgeSeparator = new Border { Height = 1, Margin = new Thickness(4, 2, 4, 7), Background = Palette.Separator };
+            edgeOverdue = Theme.Text("逾期 0", 10, Palette.Muted); edgeOverdue.HorizontalAlignment = HorizontalAlignment.Center;
+            edgeContent.Children.Add(edgeLabel); edgeContent.Children.Add(edgePending);
+            edgeContent.Children.Add(edgeSeparator); edgeContent.Children.Add(edgeOverdue);
+            EdgeButton = new Button { Content = edgeContent, Padding = new Thickness(1, 7, 1, 7),
+                HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand, Focusable = false, Style = Palette.ButtonStyle };
+            EdgeButton.Click += delegate { if (actions.RevealFromEdge != null) actions.RevealFromEdge(); };
+            AutomationProperties.SetName(EdgeButton, "展开贴边待办");
         }
 
         internal void Render(TodoState state, DateTime now, bool preview, AppearanceSettings appearancePreview)
@@ -107,6 +127,28 @@ namespace CornerTodo
             AttentionText.Text = summary;
             AttentionText.Foreground = overdue > 0 ? Palette.Warning : urgent > 0 ? Palette.Urgent : Palette.Muted;
             DateText.Text = state.Settings.Collapsed ? summary : now.ToString("M月d日 · dddd", CultureInfo.GetCultureInfo("zh-CN")) + (preview ? " · 示例" : "");
+            int pending = TodoRules.Pending(state).Count();
+            edgePending.Text = pending.ToString(CultureInfo.InvariantCulture);
+            edgePending.FontSize = pending < 100 ? 24 : pending < 1000 ? 18 : 14;
+            edgePending.MaxWidth = 36; edgePending.TextWrapping = TextWrapping.NoWrap;
+            edgePending.TextTrimming = TextTrimming.CharacterEllipsis;
+            edgeOverdue.Text = "逾期 " + overdue.ToString(CultureInfo.InvariantCulture);
+            edgeOverdue.Foreground = overdue > 0 ? Palette.Warning : urgent > 0 ? Palette.Urgent : Palette.Muted;
+            string edgeSummary = "未完成 " + pending + " 项，其中逾期 " + overdue + " 项；点击展开待办";
+            EdgeButton.ToolTip = edgeSummary;
+            AutomationProperties.SetName(EdgeButton, edgeSummary);
+        }
+
+        internal void SetEdgeHidden(bool hidden)
+        {
+            edgeHidden = hidden;
+            Surface.Child = hidden ? (UIElement)EdgeButton : Root;
+            Surface.Padding = hidden ? new Thickness(3, 4, 3, 4) : new Thickness(19, 15, 17, 12);
+            Surface.CornerRadius = hidden ? new CornerRadius(16, 0, 0, 16) : new CornerRadius(12);
+            Surface.BorderThickness = hidden ? new Thickness(1, 1, 0, 1) : new Thickness(0);
+            // The handle must remain findable even with a fully transparent panel.
+            Surface.Background = hidden ? Palette.ToolbarBackground : Palette.Background;
+            Surface.BorderBrush = Palette.Separator;
         }
 
         internal void UpdateTimes(DateTime now) { taskList.UpdateTimes(now); }
@@ -114,13 +156,18 @@ namespace CornerTodo
         private void ApplyPalette(AppearanceSettings appearance)
         {
             Palette = new PanelPalette(appearance);
-            Surface.Background = Palette.Background;
+            Surface.Background = edgeHidden ? Palette.ToolbarBackground : Palette.Background;
+            Surface.BorderBrush = Palette.Separator;
             TitleText.Foreground = Palette.Ink;
             DateText.Foreground = Palette.Muted;
             StatusText.Foreground = Palette.Warning;
             CollapseButton.Style = MoreButton.Style = AddButton.Style = Palette.ButtonStyle;
             ToolbarSurface.Background = Palette.ToolbarBackground;
             Grip.Template = Palette.ResizeTemplate;
+            EdgeButton.Style = Palette.ButtonStyle;
+            edgePending.Foreground = Palette.Ink;
+            ((StackPanel)EdgeButton.Content).Children.OfType<TextBlock>().First().Foreground = Palette.Ink;
+            edgeSeparator.Background = Palette.Separator;
         }
 
         internal void UpdateCollapsed(TodoState state, DateTime now)
