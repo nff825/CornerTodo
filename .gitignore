@@ -3,6 +3,7 @@
 /release/
 /output/
 /archive/
+/macOS/artifacts/
 [Bb]in/
 [Oo]bj/
 *.exe
