@@ -6,6 +6,18 @@
 
 v1.4.0 增加小时／分钟点选和默认关闭的「贴边自动收起」：把面板贴到主屏右侧，不操作时缩成胶囊条，点击即可展开。备注、时间进度细条、优先级与排序继续保留。更新内容见 [更新记录](CHANGELOG.md)，开发者可从 [架构与构建说明](docs/DEVELOPMENT.md) 了解各组件的职责。
 
+## macOS 实验性内测版
+
+首个 macOS 实验性内测版 **0.1.0-alpha.1** 已提供，欢迎 Mac 用户协助测试。
+
+- 支持 macOS 14 及以上，提供 Apple M 系列芯片和 Intel 两种版本。
+- 完整解压后运行 CornerTodo.app，无需安装开发环境。
+- 尚待 Mac 真机验收，未完成 Developer ID 签名和 Apple 公证。
+
+**[下载 Mac 内测版](https://github.com/nff825/CornerTodo/releases/tag/macos-v0.1.0-alpha.1)** · [使用与构建说明](macOS/README.md) · [测试步骤与反馈模板](macOS/TESTING.md)
+
+以下界面展示和功能说明主要对应 Windows 正式版。
+
 ## 界面预览
 
 以下图片均为实际 WPF 控件渲染，使用示例事项。基础面板图片沿用既有功能展示，编辑器及下方新增功能图片为 v1.4.0 界面。点击图片可查看大图。
