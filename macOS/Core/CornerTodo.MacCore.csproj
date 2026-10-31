@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>CornerTodo.MacCore</AssemblyName>
+    <RootNamespace>CornerTodo</RootNamespace>
+    <Version>0.1.0-alpha.1</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Link the authoritative Windows rules and storage implementation. -->
+    <Compile Include="../../src/Tasks/Models.cs" Link="Shared/Models.cs" />
+    <Compile Include="../../src/Tasks/ITodoStore.cs" Link="Shared/ITodoStore.cs" />
+    <Compile Include="../../src/Tasks/TaskDraft.cs" Link="Shared/TaskDraft.cs" />
+    <Compile Include="../../src/Tasks/TodoSession.cs" Link="Shared/TodoSession.cs" />
+    <Compile Include="../../src/Tasks/TodoStateCopy.cs" Link="Shared/TodoStateCopy.cs" />
+    <Compile Include="../../src/Tasks/TodoStore.cs" Link="Shared/TodoStore.cs" />
+    <Compile Include="../../src/UI/AppearanceSettings.cs" Link="Shared/AppearanceSettings.cs" />
+    <Compile Include="../../src/UI/GrowthLayout.cs" Link="Shared/GrowthLayout.cs" />
+  </ItemGroup>
+</Project>

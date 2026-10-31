@@ -1,0 +1,156 @@
+{
+  "release": "CornerTodo macOS 0.1.0-alpha.1",
+  "retrievedOn": "2026-10-26",
+  "dependencyLock": "Desktop/packages.lock.json",
+  "components": [
+    {
+      "packages": [
+        "Avalonia",
+        "Avalonia.Desktop",
+        "Avalonia.Native",
+        "Avalonia.Skia",
+        "Avalonia.Remote.Protocol",
+        "Avalonia.Themes.Fluent",
+        "Avalonia.Fonts.Inter",
+        "Avalonia.FreeDesktop",
+        "Avalonia.Win32",
+        "Avalonia.X11"
+      ],
+      "version": "11.3.19",
+      "license": "MIT",
+      "files": [
+        "Avalonia-LICENSE.txt"
+      ]
+    },
+    {
+      "packages": [
+        "Inter font embedded by Avalonia.Fonts.Inter"
+      ],
+      "version": "Embedded in Avalonia.Fonts.Inter 11.3.19",
+      "license": "OFL-1.1",
+      "files": [
+        "Inter-OFL.txt"
+      ]
+    },
+    {
+      "packages": [
+        "MicroCom.Runtime"
+      ],
+      "version": "0.11.0",
+      "license": "MIT",
+      "files": [
+        "MicroCom.Runtime-LICENSE.txt"
+      ]
+    },
+    {
+      "packages": [
+        "Tmds.DBus.Protocol"
+      ],
+      "version": "0.21.3",
+      "license": "MIT",
+      "files": [
+        "Tmds.DBus.Protocol-LICENSE.txt"
+      ]
+    },
+    {
+      "packages": [
+        "SkiaSharp",
+        "SkiaSharp.NativeAssets.macOS"
+      ],
+      "version": "2.88.9",
+      "license": "MIT and upstream notices",
+      "files": [
+        "SkiaSharp-LICENSE.txt",
+        "SkiaSharp-THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "packages": [
+        "HarfBuzzSharp",
+        "HarfBuzzSharp.NativeAssets.macOS"
+      ],
+      "version": "8.3.1.1",
+      "license": "MIT and upstream notices",
+      "files": [
+        "HarfBuzzSharp-LICENSE.txt",
+        "HarfBuzzSharp.NativeAssets.macOS-THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "packages": [
+        "Microsoft.NETCore.App.Runtime.osx-arm64",
+        "Microsoft.NETCore.App.Runtime.osx-x64",
+        "Microsoft.NETCore.App.Host.osx-arm64",
+        "Microsoft.NETCore.App.Host.osx-x64"
+      ],
+      "version": "10.0.14",
+      "license": "MIT and upstream notices",
+      "files": [
+        "DotNet-Runtime-LICENSE.txt",
+        "DotNet-Runtime-THIRD-PARTY-NOTICES.txt"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "file": "Avalonia-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/AvaloniaUI/Avalonia/ccf78f4582d9a8107c6db3a57c496d503fd441b6/licence.md",
+      "sha256": "213814d306090074d234d760239ff0f67eb9b8d20eefb4d5631bb39dbe0b769b",
+      "bytes": 1096
+    },
+    {
+      "file": "MicroCom.Runtime-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/kekekeks/MicroCom/master/LICENSE",
+      "sha256": "6ee769c9ac4dac9abb16b98b1341e9528ff9f4ab685481410d3376d14148f3a9",
+      "bytes": 1072
+    },
+    {
+      "file": "Tmds.DBus.Protocol-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/tmds/Tmds.DBus/8cb04f66c330b64244e996ff68f685f27f7381a0/COPYING",
+      "sha256": "aca3b49277abcc7886ccb2f115603a9f5b15fc3f96019a10c00f2974098b210c",
+      "bytes": 1151
+    },
+    {
+      "file": "Inter-OFL.txt",
+      "source": "https://raw.githubusercontent.com/rsms/inter/v4.1/LICENSE.txt",
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "bytes": 4380
+    },
+    {
+      "file": "SkiaSharp-LICENSE.txt",
+      "source": "NuGet: SkiaSharp/2.88.9/LICENSE.txt",
+      "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938",
+      "bytes": 1129
+    },
+    {
+      "file": "SkiaSharp-THIRD-PARTY-NOTICES.txt",
+      "source": "NuGet: SkiaSharp/2.88.9/THIRD-PARTY-NOTICES.txt",
+      "sha256": "21504c46c4c58aa64c1055bd2dcbc5f9a136b4b8c412ed3cc6740e22c5b127f5",
+      "bytes": 139775
+    },
+    {
+      "file": "HarfBuzzSharp-LICENSE.txt",
+      "source": "NuGet: HarfBuzzSharp/8.3.1.1/LICENSE.txt",
+      "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938",
+      "bytes": 1129
+    },
+    {
+      "file": "HarfBuzzSharp.NativeAssets.macOS-THIRD-PARTY-NOTICES.txt",
+      "source": "NuGet: HarfBuzzSharp.NativeAssets.macOS/8.3.1.1/THIRD-PARTY-NOTICES.txt",
+      "sha256": "21504c46c4c58aa64c1055bd2dcbc5f9a136b4b8c412ed3cc6740e22c5b127f5",
+      "bytes": 139775
+    },
+    {
+      "file": "DotNet-Runtime-LICENSE.txt",
+      "source": "NuGet: Microsoft.NETCore.App.Runtime.osx-arm64/10.0.14/LICENSE.TXT",
+      "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+      "bytes": 1116
+    },
+    {
+      "file": "DotNet-Runtime-THIRD-PARTY-NOTICES.txt",
+      "source": "NuGet: Microsoft.NETCore.App.Runtime.osx-arm64/10.0.14/THIRD-PARTY-NOTICES.TXT",
+      "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+      "bytes": 76623
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>CornerTodo.MacTests</AssemblyName>
+    <RootNamespace>CornerTodo.MacTests</RootNamespace>
+    <StartupObject>CornerTodo.MacTests.Program</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Core/CornerTodo.MacCore.csproj" />
+    <Compile Include="../../tests/StoreTests.cs" Link="Shared/StoreTests.cs" />
+    <Compile Include="../../tests/SessionTests.cs" Link="Shared/SessionTests.cs" />
+    <Compile Include="../../tests/GrowthLayoutTests.cs" Link="Shared/GrowthLayoutTests.cs" />
+    <Compile Include="../Desktop/SingleInstance.cs" Link="Desktop/SingleInstance.cs" />
+    <None Update="Fixtures/windows-v1.4.0.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
