@@ -45,6 +45,7 @@ namespace CornerTodo.MacTests
                 SerializerContract();
                 Paths(owned);
                 WindowsGoldenFixture(owned);
+                WindowsNoDeadlineFixture(owned);
                 LegacyDatesAndLiteralNotes(owned);
                 int singleInstanceAssertions = SingleInstanceTests.Run(owned);
                 File.WriteAllText(Path.Combine(owned, "verification.json"), JsonSerializer.Serialize(new {
@@ -137,9 +138,11 @@ namespace CornerTodo.MacTests
             string file = Path.Combine(directory, "todos.json"); File.WriteAllText(file, fixture, new UTF8Encoding(false));
             var store = new TodoStore(directory);
             TodoState state = store.Load();
-            Assert(store.LoadWarning == null && state.Items.Count == 2, "The Windows-shaped fixture was treated as corrupt.");
+            Assert(store.LoadWarning == null && state.Items.Count == 2 && state.Version == 2,
+                "The Windows version-one fixture did not migrate in memory without losing its tasks.");
             Assert(File.ReadAllText(file, Encoding.UTF8) == fixture, "Reading a valid Windows file rewrote its original bytes.");
             TodoItem pending = state.Items.Single(item => item.Id == "synthetic-windows-task");
+            Assert(pending.HasDeadline, "An older task without HasDeadline lost its original deadline.");
             Assert(pending.Text == "向李老师汇报研究进展 📌" && pending.Notes == "准备实验数据\n检查截止时刻" && pending.Priority == TaskPriority.High,
                 "Windows task fields were lost or escaped incorrectly.");
             Assert(pending.CreatedAt.Kind == DateTimeKind.Utc && pending.CreatedAt.Ticks % 10000 == 1234 &&
@@ -162,9 +165,49 @@ namespace CornerTodo.MacTests
             using (JsonDocument json = JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8)))
             {
                 JsonElement item = json.RootElement.GetProperty("Items")[0];
-                Assert(item.GetProperty("DueDate").GetString() == "2026-10-31T17:23:45.0004321" && item.GetProperty("Priority").GetInt32() == 1,
-                    "Saved output is no longer in the Windows version-one schema.");
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == 2 && item.GetProperty("HasDeadline").GetBoolean() &&
+                    item.GetProperty("DueDate").GetString() == "2026-10-31T17:23:45.0004321" && item.GetProperty("Priority").GetInt32() == 1,
+                    "Saving an older Windows fixture lost its date precision or version-two deadline flag.");
             }
+        }
+
+        private static void WindowsNoDeadlineFixture(string output)
+        {
+            string directory = Path.Combine(output, "windows-no-deadline"); Directory.CreateDirectory(directory);
+            string file = Path.Combine(directory, "todos.json");
+            const string fixture = "{\"Version\":2,\"Items\":[{\"Id\":\"synthetic-no-deadline\",\"Text\":\"随手记下的事项\",\"Notes\":\"稍后整理\",\"Priority\":1,\"CreatedAt\":\"2026-10-01T08:00:00.0000000\",\"HasDeadline\":false,\"DueDate\":null,\"HasTime\":false,\"DeadlineSetAt\":null}]}";
+            File.WriteAllText(file, fixture, new UTF8Encoding(false));
+            var store = new TodoStore(directory); TodoState state = store.Load();
+            Assert(store.LoadWarning == null && state.Version == 2 && state.Items.Count == 1,
+                "The version-two Windows fixture was treated as corrupt: " + store.LoadWarning);
+            Assert(File.ReadAllText(file, Encoding.UTF8) == fixture, "Reading a no-deadline fixture rewrote its original bytes.");
+            TodoItem item = state.Items.Single();
+            Assert(!item.HasDeadline && item.DueDate == DateTime.MinValue && !item.HasTime && item.DeadlineSetAt == null,
+                "A no-deadline Windows task acquired a fabricated date or scheduling interval.");
+            DateTime now = new DateTime(2026, 10, 31, 12, 0, 0);
+            Assert(TodoRules.Pending(state).Count() == 1 && TodoRules.TimeProgress(item, now) == 0 &&
+                TodoRules.UrgentCount(state, now) == 0 && TodoRules.OverdueCount(state, now) == 0 && TodoRules.Expansion(state, now) == 0,
+                "A no-deadline task was omitted from pending tasks or contributed to time-based attention.");
+            Assert(TodoRules.FormatDue(item, now) == "未设截止" && TodoRules.FormatAttention(item, now) == "未设截止",
+                "A no-deadline task displayed a fake date or overdue information.");
+            var session = new TodoSession(store, state, false, () => now);
+            session.Edit(item.Id, new TaskDraft { Text = "已修改的随手记", Notes = item.Notes, Priority = item.Priority,
+                HasDeadline = false, DueDate = DateTime.MinValue });
+            session.SetCompleted(item.Id, true);
+            var reloaded = new TodoStore(directory).Load();
+            Assert(reloaded.Items.Single().IsCompleted && !reloaded.Items.Single().HasDeadline,
+                "Completing and restarting changed the no-deadline state.");
+            using (JsonDocument json = JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8)))
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == 2 &&
+                    json.RootElement.GetProperty("Items")[0].GetProperty("DueDate").ValueKind == JsonValueKind.Null &&
+                    !json.RootElement.GetProperty("Items")[0].GetProperty("HasDeadline").GetBoolean(),
+                    "Mac storage did not preserve the shared nullable-date wire format.");
+            session.SetCompleted(item.Id, false);
+            session.Edit(item.Id, new TaskDraft { Text = "已修改的随手记", Notes = item.Notes, Priority = item.Priority,
+                HasDeadline = true, DueDate = now.AddDays(2), HasTime = true });
+            var scheduled = new TodoStore(directory).Load().Items.Single();
+            Assert(scheduled.HasDeadline && scheduled.DueDate == now.AddDays(2) && scheduled.DeadlineSetAt == now,
+                "Adding a date reused the original creation time as its progress origin.");
         }
 
         private static void LegacyDatesAndLiteralNotes(string output)
@@ -200,3 +243,4 @@ namespace CornerTodo.MacTests
         { assertions++; if (!condition) throw new InvalidOperationException(message); }
     }
 }
+

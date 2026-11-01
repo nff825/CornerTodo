@@ -275,9 +275,9 @@ public sealed class TodoWindow : Window
         content.Children.Add(label);
         var due = Ui.Text("", 12, brush: muted); content.Children.Add(due);
         var progress = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = accent,
-            HorizontalAlignment = HorizontalAlignment.Left, IsVisible = !item.IsCompleted };
-        var track = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Brush.Parse("#30628697"), Child = progress, IsVisible = !item.IsCompleted };
-        content.Children.Add(track); Grid.SetColumn(content, 1); grid.Children.Add(content);
+            HorizontalAlignment = HorizontalAlignment.Left, IsVisible = item.HasDeadline && !item.IsCompleted };
+        var track = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Brush.Parse("#30628697"), Child = progress, IsVisible = item.HasDeadline && !item.IsCompleted };
+        if (item.HasDeadline) content.Children.Add(track); Grid.SetColumn(content, 1); grid.Children.Add(content);
         var badges = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Top };
         badges.Children.Add(new Border { Child = Ui.Text(TodoRules.PriorityLabel(item.Priority), 10, brush: muted),
             Background = Brush.Parse("#18628697"), CornerRadius = new CornerRadius(3), Padding = new Thickness(4, 2) });
@@ -316,6 +316,7 @@ public sealed class TodoWindow : Window
         var item = row.Item; bool overdue = TodoRules.IsOverdue(item, now), soon = TodoRules.IsUrgent(item, now);
         row.Due.Text = TodoRules.FormatAttention(item, now);
         row.Due.Foreground = overdue ? warning : soon ? urgent : muted;
+        row.Track.IsVisible = row.Progress.IsVisible = item.HasDeadline && !item.IsCompleted;
         row.Progress.Background = overdue ? warning : soon ? urgent : accent;
         row.Progress.Width = Math.Max(0, row.Track.Bounds.Width * TodoRules.TimeProgress(item, now));
         if (!InteractionBlocked)
@@ -323,9 +324,13 @@ public sealed class TodoWindow : Window
             row.Label.FontSize = item.IsCompleted ? 15 : overdue ? 21 : soon ? 19 : 15;
             row.Label.FontWeight = !item.IsCompleted && (overdue || soon) ? FontWeight.SemiBold : FontWeight.Normal;
         }
-        int percent = (int)Math.Round(TodoRules.TimeProgress(item, now) * 100);
-        if (!overdue) percent = Math.Min(99, percent);
-        ToolTip.SetTip(row.Track, "时间已用 " + percent + "%（不是完成进度）");
+        if (item.HasDeadline && !item.IsCompleted)
+        {
+            int percent = (int)Math.Round(TodoRules.TimeProgress(item, now) * 100);
+            if (!overdue) percent = Math.Min(99, percent);
+            ToolTip.SetTip(row.Track, "时间已用 " + percent + "%（不是完成进度）");
+        }
+        else ToolTip.SetTip(row.Track, null);
     }
 
     private void RefreshSurface()

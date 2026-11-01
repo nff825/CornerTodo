@@ -31,6 +31,7 @@ internal static class PreviewChecks
             SavePng(window, Path.Combine(outputDirectory, "panel.png"));
         }
         await ValidateTaskEditor(window);
+        await ValidateNoDeadlinePanel(window, outputDirectory);
         ValidateAppearance(window);
         await ValidateRealEditorFlow(window);
         await ValidateEditorLayouts(window, outputDirectory);
@@ -79,6 +80,19 @@ internal static class PreviewChecks
             Assert(saveCalls == 1 && editor.TaskText.Text == "修改文字" && editor.Notes.Text!.Contains("第二行"), "A failed save lost its editor draft.");
             editor.UseTime.IsChecked = false;
             Assert(!editor.BuildDraft().HasTime && !editor.Hour.IsEnabled && !editor.Minute.IsEnabled, "Date-only mode retained an enabled time input.");
+            editor.UseDeadline.IsChecked = false;
+            Assert(editor.Date.GetLogicalParent() is Control fields && !fields.IsVisible,
+                "Disabling a deadline did not hide its date and time field group.");
+            editor.Hour.Input.Text = "invalid";
+            draft = editor.BuildDraft();
+            Assert(!draft.HasDeadline && draft.DueDate == DateTime.MinValue && !draft.HasTime && draft.Notes.Contains("第二行"),
+                "A no-deadline draft validated hidden time inputs or lost its other fields.");
+            save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(saveCalls == 2 && editor.UseDeadline.IsChecked == false && editor.IsVisible,
+                "A failed no-deadline save closed the editor or restored a fabricated deadline.");
+            editor.UseDeadline.IsChecked = true; editor.Hour.Input.Text = "17";
+            Assert(editor.Date.GetLogicalParent() is Control enabledFields && enabledFields.IsVisible && editor.BuildDraft().HasDeadline,
+                "Re-enabling the deadline did not restore a usable date draft.");
             CultureInfo previousCulture = CultureInfo.CurrentCulture;
             try
             {
@@ -96,6 +110,50 @@ internal static class PreviewChecks
             Assert(source.Text == "原事项" && source.Notes == "原备注" && source.DueDate == utc, "Editing mutated the original item before a successful save.");
         }
         finally { editor.Close(); }
+        var noDeadlineItem = new TodoItem { Id = "editor-no-deadline", Text = "随手记下", Notes = "保留备注",
+            HasDeadline = false, DueDate = DateTime.MinValue, CreatedAt = DateTime.Now.AddDays(-60) };
+        var noDeadlineEditor = new TaskEditorWindow(noDeadlineItem, _ => false);
+        try
+        {
+            noDeadlineEditor.Show(owner); await Task.Delay(60);
+            Assert(noDeadlineEditor.UseDeadline.IsChecked == false && !noDeadlineEditor.BuildDraft().HasDeadline &&
+                noDeadlineEditor.Date.SelectedDate == DateTime.Today,
+                "Editing a stored no-deadline task did not retain its state or provide a usable optional date.");
+            noDeadlineEditor.UseDeadline.IsChecked = true;
+            Assert(noDeadlineEditor.BuildDraft().DueDate.Date == DateTime.Today,
+                "Adding a deadline to an undated task reused its empty in-memory date.");
+            Assert(!noDeadlineItem.HasDeadline && noDeadlineItem.DueDate == DateTime.MinValue,
+                "Toggling an editor deadline mutated its source before saving.");
+        }
+        finally { noDeadlineEditor.Close(); }
+    }
+
+    private static async Task ValidateNoDeadlinePanel(TodoWindow owner, string? outputDirectory)
+    {
+        var item = new TodoItem { Id = "panel-no-deadline", Text = "整理实验数据", HasDeadline = false,
+            DueDate = DateTime.MinValue, CreatedAt = DateTime.Now.AddDays(-60), Priority = TaskPriority.High };
+        var state = new TodoState { Items = new List<TodoItem> { item } };
+        string directory = Path.Combine(Program.Options.DataDirectory, "no-deadline-helper");
+        var session = new TodoSession(new TodoStore(directory), state, true);
+        var panel = new TodoWindow(session, directory, () => { }) { PreviewMode = true };
+        try
+        {
+            panel.Show(owner); await Task.Delay(80);
+            var due = Descendants(panel).OfType<TextBlock>().Single(text => text.Text == "未设截止");
+            Assert(due.GetLogicalParent() is StackPanel content && !content.Children.OfType<Border>().Any(border => border.Height == 3),
+                "An undated row retained a time-bar track in its visual content.");
+            Assert(Descendants(panel).OfType<TextBlock>().Any(text => text.Text == "逾期 0 项 · 6小时内 0 项"),
+                "An old undated task was counted as overdue or urgent.");
+            Assert(Descendants(panel).OfType<TextBlock>().Single(text => text.Text == item.Text).FontSize == 15,
+                "An undated high-priority task was enlarged as deadline urgency.");
+            if (outputDirectory != null) SavePng(panel, Path.Combine(outputDirectory, "panel-no-deadline.png"));
+            session.SetCompleted(item.Id, true); panel.RestorePanel(); await Task.Delay(60);
+            Assert(Descendants(panel).OfType<TextBlock>().Any(text => text.Text == "未设截止") &&
+                Descendants(panel).OfType<TextBlock>().Single(text => text.Text == item.Text).TextDecorations == TextDecorations.Strikethrough,
+                "Completing an undated row lost its status label or strikethrough.");
+            Assert(!Directory.Exists(directory), "The isolated preview unexpectedly wrote no-deadline task data.");
+        }
+        finally { panel.Close(); }
     }
 
     private static void ValidateAppearance(TodoWindow owner)

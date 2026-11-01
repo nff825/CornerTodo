@@ -15,6 +15,7 @@ internal sealed class TaskEditorWindow : Window
     internal TextBox TaskText { get; }
     internal TextBox Notes { get; }
     internal CalendarDatePicker Date { get; }
+    internal CheckBox UseDeadline { get; }
     internal CheckBox UseTime { get; }
     internal TimePart Hour { get; }
     internal TimePart Minute { get; }
@@ -40,21 +41,33 @@ internal sealed class TaskEditorWindow : Window
         TaskText = Ui.Input("待办事项", item?.Text ?? "", Math.Max(500, item?.Text?.Length ?? 0)); TaskText.Height = 76;
         TaskText.AcceptsReturn = true; TaskText.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
         AutomationProperties.SetName(TaskText, "待办事项"); fields.Children.Add(TaskText);
-        var due = item?.DueDate ?? DateTime.Today;
+        var due = item?.HasDeadline == true ? item.DueDate : DateTime.Today;
         if (due.Kind == DateTimeKind.Utc) due = due.ToLocalTime();
-        var dateLabel = Ui.Text("截止日期", 13, brush: Ui.Muted); dateLabel.Margin = new Thickness(0, 8, 0, 0); fields.Children.Add(dateLabel);
+        UseDeadline = new CheckBox { Content = "设置截止日期", IsChecked = item == null || item.HasDeadline,
+            Margin = new Thickness(0, 8, 0, 0) };
+        AutomationProperties.SetName(UseDeadline, "设置截止日期"); fields.Children.Add(UseDeadline);
+        var deadlineFields = new StackPanel { Spacing = 8 };
+        var noDeadlineHint = Ui.Text("未设截止，可随时补充", 12, brush: Ui.Muted);
+        fields.Children.Add(noDeadlineHint); fields.Children.Add(deadlineFields);
         Date = new CalendarDatePicker { SelectedDate = due.Date, SelectedDateFormat = CalendarDatePickerFormat.Long,
             HorizontalAlignment = HorizontalAlignment.Stretch, Watermark = "选择截止日期" };
-        AutomationProperties.SetName(Date, "截止日期"); fields.Children.Add(Date);
-        UseTime = new CheckBox { Content = "设置具体时刻", IsChecked = item?.HasTime == true, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(Date, "截止日期"); deadlineFields.Children.Add(Date);
+        UseTime = new CheckBox { Content = "设置具体时刻", IsChecked = item?.HasDeadline == true && item.HasTime, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(UseTime, "设置具体时刻");
-        Hour = new TimePart(24, item?.HasTime == true ? due.Hour : 18, "截止小时，24小时制");
-        Minute = new TimePart(60, item?.HasTime == true ? due.Minute : 0, "截止分钟");
+        Hour = new TimePart(24, item?.HasDeadline == true && item.HasTime ? due.Hour : 18, "截止小时，24小时制");
+        Minute = new TimePart(60, item?.HasDeadline == true && item.HasTime ? due.Minute : 0, "截止分钟");
         Hour.IsEnabled = Minute.IsEnabled = UseTime.IsChecked == true;
         UseTime.PropertyChanged += (_, e) => { if (e.Property == ToggleButton.IsCheckedProperty) Hour.IsEnabled = Minute.IsEnabled = UseTime.IsChecked == true; };
         var time = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Margin = new Thickness(0, 3, 0, 0) };
         time.Children.Add(UseTime); time.Children.Add(Hour);
-        var colon = Ui.Text(":", 16); colon.VerticalAlignment = VerticalAlignment.Center; time.Children.Add(colon); time.Children.Add(Minute); fields.Children.Add(time);
+        var colon = Ui.Text(":", 16); colon.VerticalAlignment = VerticalAlignment.Center; time.Children.Add(colon); time.Children.Add(Minute); deadlineFields.Children.Add(time);
+        void UpdateDeadlineFields()
+        {
+            bool enabled = UseDeadline.IsChecked == true;
+            deadlineFields.IsVisible = enabled; noDeadlineHint.IsVisible = !enabled;
+        }
+        UseDeadline.PropertyChanged += (_, e) => { if (e.Property == ToggleButton.IsCheckedProperty) UpdateDeadlineFields(); };
+        UpdateDeadlineFields();
         var priorityLabel = Ui.Text("优先级", 13, brush: Ui.Muted); priorityLabel.Margin = new Thickness(0, 8, 0, 0); fields.Children.Add(priorityLabel);
         var priorities = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*,*"), ColumnSpacing = 12 };
         string group = "priority-" + Guid.NewGuid().ToString("N");
@@ -91,6 +104,10 @@ internal sealed class TaskEditorWindow : Window
         if (text.Length == 0) throw new InvalidOperationException("请填写待办事项。");
         string notes = Notes.Text ?? "";
         if (notes.Length > TodoRules.MaxNotesLength) { notesSection.IsExpanded = true; throw new InvalidOperationException("备注最多可填写5000个字符，请精简后保存。"); }
+        TaskPriority priority = high.IsChecked == true ? TaskPriority.High : low.IsChecked == true ? TaskPriority.Low : TaskPriority.Normal;
+        if (UseDeadline.IsChecked != true)
+            return new TaskDraft { Text = text, Notes = notes, Priority = priority,
+                HasDeadline = false, DueDate = DateTime.MinValue, HasTime = false };
         DateTime selected;
         if (!string.IsNullOrWhiteSpace(Date.Text))
         {
@@ -109,13 +126,13 @@ internal sealed class TaskEditorWindow : Window
                 throw new InvalidOperationException("请选择有效时刻：小时00–23，分钟00–59。");
             due = due.AddHours(hour).AddMinutes(minute);
         }
-        if (original != null && hasTime == original.HasTime)
+        if (original?.HasDeadline == true && hasTime == original.HasTime)
         {
             var local = original.DueDate.Kind == DateTimeKind.Utc ? original.DueDate.ToLocalTime() : original.DueDate;
             if (due.Date == local.Date && (!hasTime || (due.Hour == local.Hour && due.Minute == local.Minute))) due = original.DueDate;
         }
-        return new TaskDraft { Text = text, Notes = notes, DueDate = due, HasTime = hasTime,
-            Priority = high.IsChecked == true ? TaskPriority.High : low.IsChecked == true ? TaskPriority.Low : TaskPriority.Normal };
+        return new TaskDraft { Text = text, Notes = notes, DueDate = due, HasDeadline = true, HasTime = hasTime,
+            Priority = priority };
     }
 
     internal static bool TryParseEditorDate(string? text, out DateTime selected)
