@@ -30,12 +30,14 @@
     <Compile Include="src/App/LaunchOptions.cs" />
     <Compile Include="src/UI/MainWindow.cs" />
     <Compile Include="src/Tasks/Models.cs"><TestGroups>Store;Session</TestGroups></Compile>
+    <Compile Include="src/Tasks/RecurringTasks.cs"><TestGroups>Store;Session</TestGroups></Compile>
     <Compile Include="src/UI/PanelController.cs" />
     <Compile Include="src/App/Program.cs" />
     <Compile Include="src/App/SingleInstanceSession.cs" />
     <Compile Include="src/Windows/StartupManager.cs" />
     <Compile Include="src/Tasks/TaskDraft.cs"><TestGroups>Session</TestGroups></Compile>
     <Compile Include="src/UI/TaskEditor.cs" />
+    <Compile Include="src/UI/RecurringTasksWindow.cs" />
     <Compile Include="src/UI/TaskListView.cs" />
     <Compile Include="src/UI/Theme.cs" />
     <Compile Include="src/Tasks/TodoSession.cs"><TestGroups>Session</TestGroups></Compile>
@@ -57,6 +59,7 @@
   <ItemGroup>
     <CornerTodoTestSuite Include="Store"><SourceGroup>Store</SourceGroup><EntryPoint>StoreTests</EntryPoint><Runner>tests/Run-StoreTests.ps1</Runner></CornerTodoTestSuite>
     <CornerTodoTestSuite Include="Session"><SourceGroup>Session</SourceGroup><EntryPoint>SessionTests</EntryPoint><Runner>tests/Run-SessionTests.ps1</Runner></CornerTodoTestSuite>
+    <CornerTodoTestSuite Include="Recurrence"><SourceGroup>Session</SourceGroup><EntryPoint>RecurrenceTests</EntryPoint><Runner>tests/Run-RecurrenceTests.ps1</Runner></CornerTodoTestSuite>
     <CornerTodoTestSuite Include="Growth"><SourceGroup>Growth</SourceGroup><EntryPoint>GrowthLayoutTests</EntryPoint><Runner>tests/Run-GrowthLayoutTests.ps1</Runner></CornerTodoTestSuite>
     <CornerTodoTestSuite Include="Panel"><SourceGroup>All</SourceGroup><EntryPoint>PanelControllerTests</EntryPoint><Runner>tests/Run-PanelTests.ps1</Runner></CornerTodoTestSuite>
     <CornerTodoTestSuite Include="View"><SourceGroup>All</SourceGroup><EntryPoint>ViewTests</EntryPoint><Runner>tests/Run-ViewTests.ps1</Runner></CornerTodoTestSuite>
@@ -68,9 +71,11 @@
     <CornerTodoTestSuite Include="Lifecycle"><SourceGroup>All</SourceGroup><EntryPoint>LifecycleTests</EntryPoint><Runner>tests/Run-LifecycleTests.ps1</Runner></CornerTodoTestSuite>
     <CornerTodoTestSource Include="tests/StoreTests.cs"><Suite>Store</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/SessionTests.cs"><Suite>Session</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/RecurrenceTests.cs"><Suite>Recurrence</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/GrowthLayoutTests.cs"><Suite>Growth</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/PanelControllerTests.cs"><Suite>Panel</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/ViewTests.cs"><Suite>View</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/RecurringUiTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/TaskEditorTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/OffscreenUiTests.cs"><Suite>OffscreenUi</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/EdgeUiTests.cs"><Suite>OffscreenUi</Suite></CornerTodoTestSource>
@@ -117,6 +122,10 @@
     <CornerTodoPublicFile Include="docs/images/edge-capsule.png" />
     <CornerTodoPublicFile Include="docs/images/no-deadline-panel.png" />
     <CornerTodoPublicFile Include="docs/images/no-deadline-editor.png" />
+    <CornerTodoPublicFile Include="docs/images/recurring-editor-default.png" />
+    <CornerTodoPublicFile Include="docs/images/recurring-editor-weekly.png" />
+    <CornerTodoPublicFile Include="docs/images/recurring-management.png" />
+    <CornerTodoPublicFile Include="docs/images/recurring-panel.png" />
     <!-- Keep linked task rules and Mac development UI in the same public source snapshot. -->
     <CornerTodoPublicFile Include="macOS/VERSION" />
     <CornerTodoPublicFile Include="macOS/README.md" />

@@ -32,6 +32,8 @@ namespace CornerTodo
         private string dateStamp;
         private bool disposed;
         private DispatcherOperation resumeOperation;
+        private DispatcherOperation recurrenceOperation;
+        private bool missedRecurrencesOffered;
         private const string DesktopPendingMessage = "暂时无法连接桌面层。当前以普通窗口显示。";
         public bool HostLost { get; set; }
         public event EventHandler HandleLost;
@@ -78,7 +80,10 @@ namespace CornerTodo
                 SetSortMode = delegate(TaskSortMode mode) {
                     return Execute(delegate { session.SetSortMode(mode); }, "排序方式未保存。", true);
                 },
-                Delete = Delete, TrackMenu = TrackMenu
+                Delete = Delete, TrackMenu = TrackMenu,
+                EditRecurringRule = delegate(TodoItem item) { EditRecurringRule(item.RecurringRuleId, false); },
+                SetRecurringPaused = delegate(TodoItem item, bool paused) { SetRecurringPaused(item.RecurringRuleId, paused); },
+                StopRecurringRule = delegate(TodoItem item) { StopRecurringRule(item.RecurringRuleId); }
             });
             Content = panel.Surface;
             interaction = new PanelController(this, panel.Header, panel.Grip, panelHost ?? new DesktopPanelHost(this),
@@ -95,7 +100,7 @@ namespace CornerTodo
                         panel.UpdateHeader(this.state, DateTime.Now, preview);
                         panel.UpdateTimes(DateTime.Now);
                     }
-                    else Render();
+                    else { ProcessRecurrences(false); Render(); }
                 }
                 else UpdateExpansion(false, false);
             };
@@ -120,6 +125,7 @@ namespace CornerTodo
                 ShowStatus("已恢复数据，请查看提示。");
                 ShowModal(store.LoadWarning, "待办数据恢复", MessageBoxButton.OK, MessageBoxImage.Warning, MessageBoxResult.OK);
             }
+            QueueRecurrenceCheck();
         }
 
         private void DesktopPendingChanged(bool pending)
@@ -148,6 +154,7 @@ namespace CornerTodo
             interaction.Dispose();
             saveTimer.Stop(); refreshTimer.Stop();
             if (resumeOperation != null) { resumeOperation.Abort(); resumeOperation = null; }
+            if (recurrenceOperation != null) { recurrenceOperation.Abort(); recurrenceOperation = null; }
         }
 
         public void RestoreToDesktop()
@@ -212,6 +219,10 @@ namespace CornerTodo
                 RefreshStartupMenu(loginStartup, repairStartup);
             };
             var create = new MenuItem { Header = "添加待办" }; create.Click += delegate { Edit(null); }; menu.Items.Add(create);
+            var recurring = new MenuItem { Header = "管理重复任务…", Tag = "recurring-management" };
+            recurring.Click += delegate { ManageRecurringTasks(); }; menu.Items.Add(recurring);
+            var catchUp = new MenuItem { Header = "处理遗漏周期…", Tag = "recurring-catch-up" };
+            catchUp.Click += delegate { ResolveMissedRecurrences(false); }; menu.Items.Add(catchUp);
             var showCompleted = new MenuItem { Header = state.Settings.CompletedCollapsed ? "展开已完成" : "收起已完成", Tag = "completed-toggle" };
             showCompleted.Click += delegate {
                 Execute(delegate { session.SetCompletedCollapsed(!state.Settings.CompletedCollapsed); }, "保存失败，修改尚未保存。", true);
@@ -291,12 +302,17 @@ namespace CornerTodo
             RevealFromEdge();
             try
             {
+                bool savedRecurrence = false;
+                bool futureOnly = false;
                 var editor = new TaskEditor(item, focusNotes, delegate(TaskDraft draft) {
-                    return Execute(delegate {
-                        if (item == null) session.Add(draft);
+                    bool saved = Execute(delegate {
+                        if (item == null) futureOnly = session.Add(draft) == null;
                         else session.Edit(item.Id, draft);
                     }, "保存失败，输入仍保留在编辑窗口。", false);
+                    if (saved) savedRecurrence = draft.Recurrence != null;
+                    return saved;
                 });
+                editor.SaveErrorProvider = delegate { return panel.StatusText.Text; };
                 Rect area = DesktopHost.WorkArea(this);
                 editor.MinWidth = Math.Min(editor.MinWidth, Math.Max(1, area.Width - 24));
                 editor.MinHeight = Math.Min(editor.MinHeight, Math.Max(1, area.Height - 24));
@@ -307,13 +323,170 @@ namespace CornerTodo
                 editor.WindowStartupLocation = WindowStartupLocation.Manual;
                 editor.Left = Math.Max(area.Left + 12, area.Right - editor.Width - 26);
                 editor.Top = Math.Max(area.Top + 20, Math.Min(DesktopHost.GetBounds(this).Top + 55, area.Bottom - editor.Height - 20));
+                LimitChildHeightAtPosition(editor, area);
                 if (editor.ShowDialog() == true)
                 {
-                    panel.StatusText.Visibility = Visibility.Collapsed;
+                    if (savedRecurrence) ShowStatus(futureOnly ? "重复规则已保存，将按开始日期生成；可在“管理重复任务”查看。" : "重复规则已保存，已有事项与完成历史保留。");
+                    else panel.StatusText.Visibility = Visibility.Collapsed;
                     Render();
                 }
             }
             finally { applicationInteraction.EditorOpen = false; ResumeAttention(); }
+        }
+
+        private void FitRecurringWindow(Window child)
+        {
+            Rect area = DesktopHost.WorkArea(this);
+            child.MinWidth = Math.Min(child.MinWidth, Math.Max(1, area.Width - 24));
+            child.MinHeight = Math.Min(child.MinHeight, Math.Max(1, area.Height - 24));
+            child.MaxWidth = Math.Max(child.MinWidth, area.Width - 24); child.MaxHeight = Math.Max(child.MinHeight, area.Height - 24);
+            child.Width = Math.Min(child.Width, child.MaxWidth); child.Height = Math.Min(child.Height, child.MaxHeight);
+            child.WindowStartupLocation = WindowStartupLocation.Manual;
+            child.Left = Math.Max(area.Left + 12, area.Right - child.Width - 26);
+            child.Top = Math.Max(area.Top + 12, Math.Min(DesktopHost.GetBounds(this).Top + 35, area.Bottom - child.Height - 12));
+            LimitChildHeightAtPosition(child, area);
+        }
+
+        internal static void LimitChildHeightAtPosition(Window child, Rect workArea)
+        {
+            double available = Math.Max(1, workArea.Bottom - child.Top - 12);
+            child.MinHeight = Math.Min(child.MinHeight, available);
+            child.MaxHeight = Math.Min(child.MaxHeight, available);
+            child.Height = Math.Min(child.Height, child.MaxHeight);
+        }
+
+        private void ManageRecurringTasks()
+        {
+            if (disposed || applicationInteraction.IsBusy) return;
+            applicationInteraction.EditorOpen = true; interaction.StopAnimation(); RevealFromEdge();
+            try {
+                var manager = new RecurringTasksWindow(session.Snapshot,
+                    delegate(string id) { EditRecurringRule(id, true); }, SetRecurringPaused, StopRecurringRule,
+                    delegate { ResolveMissedRecurrences(true); }, null, session.GetRecurrenceSummary);
+                FitRecurringWindow(manager); manager.ShowDialog();
+                state = session.Snapshot(); Render();
+            }
+            finally { applicationInteraction.EditorOpen = false; ResumeAttention(); }
+        }
+
+        private void EditRecurringRule(string id, bool nested)
+        {
+            if (disposed || (!nested && applicationInteraction.IsBusy)) return;
+            RecurringTaskRule rule = session.GetRecurringRule(id);
+            if (rule.IsStopped) { ShowStatus("此规则已经停止，已有事项仍可单独编辑。"); return; }
+            if (session.GetRecurrenceSummary(id).MissedCount > 0) {
+                if (ShowModal("这条规则还有未处理的遗漏周期。请先处理遗漏，再修改后续规则，避免长时间编辑后才被要求返回。\n\n现在打开遗漏周期处理？", "先处理此规则的遗漏周期", MessageBoxButton.YesNo, MessageBoxImage.Information, MessageBoxResult.Yes) == MessageBoxResult.Yes)
+                    ResolveMissedRecurrences(nested);
+                if (session.GetRecurrenceSummary(id).MissedCount > 0) return;
+                rule = session.GetRecurringRule(id);
+            }
+            bool previousEditor = applicationInteraction.EditorOpen;
+            applicationInteraction.EditorOpen = true; interaction.StopAnimation(); RevealFromEdge();
+            try {
+                var template = new TodoItem { Id = rule.Id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority,
+                    HasDeadline = rule.HasDeadline, HasTime = rule.HasTime,
+                    DueDate = rule.HasDeadline ? rule.Recurrence.StartDate.AddDays(rule.DeadlineOffsetDays).AddTicks(rule.DeadlineTimeTicks) : DateTime.MinValue };
+                TaskEditor editor = null; string saveError = null;
+                editor = new TaskEditor(template, false, delegate(TaskDraft draft) {
+                    editor.RecoverRecurrenceHistory = null;
+                    if (draft.Recurrence == null) {
+                        bool stopped = StopRecurringRule(id);
+                        saveError = stopped ? null : panel.StatusText.Text;
+                        return stopped;
+                    }
+                    bool saved = TrySaveRecurringRule(id, draft, out saveError);
+                    if (!saved && session.GetRecurrenceSummary(id).MissedCount > 0) {
+                        editor.RecoverRecurrenceHistory = delegate {
+                            ResolveMissedRecurrences(true);
+                            return session.GetRecurrenceSummary(id).MissedCount == 0;
+                        };
+                    }
+                    return saved;
+                }, RecurringTasks.Copy(rule.Recurrence), true);
+                editor.SaveErrorProvider = delegate { return saveError; };
+                FitRecurringWindow(editor);
+                if (editor.ShowDialog() == true) { state = session.Snapshot(); Render(); ShowStatus("后续规则已更新，已生成事项与完成历史保持原样。"); }
+            }
+            finally { applicationInteraction.EditorOpen = previousEditor; if (!nested) ResumeAttention(); }
+        }
+
+        internal bool TrySaveRecurringRule(string id, TaskDraft draft, out string failure)
+        {
+            failure = null;
+            try { session.EditRecurringRule(id, draft); }
+            catch (Exception error) {
+                failure = "保存失败，输入仍保留：" + error.Message;
+                ShowStatus(failure); return false;
+            }
+            state = session.Snapshot(); return true;
+        }
+
+        private bool SetRecurringPaused(string id, bool paused)
+        {
+            bool saved = Execute(delegate { session.SetRecurringPaused(id, paused); }, "重复规则状态未保存。", true);
+            if (saved) ShowStatus(paused ? "已暂停后续生成，已有事项保留。" : "已恢复后续生成，不追补暂停期间的历史周期。");
+            return saved;
+        }
+
+        private bool StopRecurringRule(string id)
+        {
+            if (ShowModal("停止这条规则的后续重复？\n\n尚未生成的遗漏周期也不再补建；已生成事项与完成历史都会保留，不会删除本次事项。", "停止后续重复", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) {
+                ShowStatus("已取消停止后续重复，规则保持原样。"); return false;
+            }
+            bool saved = Execute(delegate { session.StopRecurringRule(id); }, "后续重复尚未停止。", true);
+            if (saved) ShowStatus("后续重复已停止，已有事项保留。"); return saved;
+        }
+
+        private void QueueRecurrenceCheck()
+        {
+            if (disposed || recurrenceOperation != null) return;
+            recurrenceOperation = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate {
+                recurrenceOperation = null;
+                if (disposed || HostLost || InteractionBlocked || applicationInteraction.IsBusy) return;
+                ProcessRecurrences(true);
+            }));
+        }
+
+        internal int ProcessRecurrences(bool offerMissed)
+        {
+            if (disposed || HostLost || InteractionBlocked || applicationInteraction.IsBusy || state.RecurringRules.Count == 0) return 0;
+            int generated = 0;
+            if (!Execute(delegate { generated = session.GenerateCurrentRecurrences(); }, "重复事项未生成，可稍后重试。", false)) return 0;
+            if (generated > 0) { Render(); ShowStatus("已按计划生成 " + generated + " 项重复事项。"); }
+            RecurrenceSummary summary = session.GetRecurrenceSummary();
+            if (summary.MissedCount > 0) {
+                ShowStatus("有 " + summary.MissedCount + " 期重复计划待处理，可从“⋯ → 处理遗漏周期”选择补建或跳过。");
+                if (offerMissed && !missedRecurrencesOffered) { missedRecurrencesOffered = true; ResolveMissedRecurrences(false); }
+            }
+            return generated;
+        }
+
+        private void ResolveMissedRecurrences(bool nested)
+        {
+            if (disposed || (!nested && applicationInteraction.IsBusy)) return;
+            bool previousEditor = applicationInteraction.EditorOpen;
+            applicationInteraction.EditorOpen = true; interaction.StopAnimation(); RevealFromEdge();
+            try {
+                RecurrenceSummary summary = session.GetRecurrenceSummary();
+                if (summary.TotalCount == 0) { ShowStatus("当前没有待处理的遗漏周期。"); return; }
+                if (summary.MissedCount == 0) {
+                    int currentCount = 0;
+                    if (Execute(delegate { currentCount = session.GenerateCurrentRecurrences(); }, "当期事项未生成，可稍后重试。", true))
+                        ShowStatus("已按计划生成 " + currentCount + " 项当期事项。");
+                    return;
+                }
+                int generated = 0;
+                var dialog = new RecurrenceCatchUpWindow(summary.MissedCount, summary.DueTodayCount, delegate(bool include) {
+                    return Execute(delegate { generated = session.ResolveMissedRecurrences(include); }, "遗漏周期未保存，仍可重试。", false);
+                });
+                FitRecurringWindow(dialog);
+                if (dialog.ShowDialog() == true) {
+                    state = session.Snapshot(); Render();
+                    long remaining = session.GetRecurrenceSummary().MissedCount;
+                    ShowStatus("已生成 " + generated + " 项。" + (remaining > 0 ? "仍有 " + remaining + " 期遗漏，可继续处理。" : "遗漏周期已处理。"));
+                }
+            }
+            finally { applicationInteraction.EditorOpen = previousEditor; if (!nested) ResumeAttention(); }
         }
 
         private void EditAppearance()
@@ -365,7 +538,7 @@ namespace CornerTodo
         private void Delete(TodoItem item)
         {
             string description = item.Text.Length > 100 ? item.Text.Substring(0, 100) + "…" : item.Text;
-            if (ShowModal("删除这条待办？\n\n" + description, "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            if (ShowModal((String.IsNullOrEmpty(item.RecurringRuleId) ? "删除这条待办？" : "删除本次事项？后续重复规则继续保留，本期不会再次生成。") + "\n\n" + description, "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
             Execute(delegate { session.Delete(item.Id); }, "保存失败，修改尚未保存。", true);
         }
 
@@ -435,6 +608,7 @@ namespace CornerTodo
                 resumeOperation = null;
                 resumeQueued = false;
                 if (disposed || !interaction.IsReady || HostLost || InteractionBlocked) return;
+                ProcessRecurrences(true);
                 if (deferredRender || dateStamp != DateTime.Now.ToString("yyyyMMddHHmmss")) Render();
                 else UpdateExpansion(false, false);
             }));

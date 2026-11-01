@@ -9,11 +9,12 @@ namespace CornerTodo
         public static TodoState Copy(TodoState state)
         {
             if (state == null) throw new ArgumentNullException("state");
-            if (state.Items == null || state.Settings == null) throw new ArgumentException("待办列表或窗口设置缺失。", "state");
+            if (state.Items == null || state.Settings == null || state.RecurringRules == null) throw new ArgumentException("待办列表、重复规则或窗口设置缺失。", "state");
             WidgetSettings settings = state.Settings;
             return new TodoState {
                 Version = state.Version,
                 Items = state.Items.Select(Copy).ToList(),
+                RecurringRules = state.RecurringRules.Select(RecurringTasks.Copy).ToList(),
                 Settings = new WidgetSettings {
                     Left = settings.Left, Top = settings.Top, Width = settings.Width, Height = settings.Height,
                     Collapsed = settings.Collapsed, CompletedCollapsed = settings.CompletedCollapsed,
@@ -29,7 +30,8 @@ namespace CornerTodo
             return new TodoItem {
                 Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsCompleted = item.IsCompleted,
                 CreatedAt = item.CreatedAt, CompletedAt = item.CompletedAt,
-                DueDate = item.DueDate, HasDeadline = item.HasDeadline, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt
+                DueDate = item.DueDate, HasDeadline = item.HasDeadline, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt,
+                RecurringRuleId = item.RecurringRuleId, OccurrenceDate = item.OccurrenceDate, RepeatLabel = item.RepeatLabel
             };
         }
     }

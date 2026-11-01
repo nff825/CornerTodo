@@ -22,6 +22,9 @@ namespace CornerTodo
         public Action<TodoItem> EditNotes { get; set; }
         public Func<TaskSortMode, bool> SetSortMode { get; set; }
         public Action<TodoItem> Delete { get; set; }
+        public Action<TodoItem> EditRecurringRule { get; set; }
+        public Action<TodoItem, bool> SetRecurringPaused { get; set; }
+        public Action<TodoItem> StopRecurringRule { get; set; }
         public Action<ContextMenu> TrackMenu { get; set; }
     }
 

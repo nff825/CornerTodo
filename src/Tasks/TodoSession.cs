@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Globalization;
 
 namespace CornerTodo
 {
@@ -25,7 +27,7 @@ namespace CornerTodo
             if (now == null) throw new ArgumentNullException("now");
             this.store = store; this.preview = preview; this.now = now;
             current = TodoStateCopy.Copy(initialState);
-            if (current.Version != 1 && current.Version != TodoState.CurrentVersion)
+            if (current.Version < 1 || current.Version > TodoState.CurrentVersion)
                 throw new NotSupportedException("无法读取此版本的待办数据：" + current.Version + "。请使用支持该数据版本的程序。");
             current.Version = TodoState.CurrentVersion;
         }
@@ -39,6 +41,15 @@ namespace CornerTodo
         {
             TaskDraft input = ReadDraft(draft);
             DateTime savedAt = now();
+            if (input.Recurrence != null) {
+                var recurringState = Snapshot();
+                if (recurringState.RecurringRules.Count >= RecurringTasks.MaximumRuleCount) throw new InvalidOperationException("重复规则数量已达上限。");
+                RecurringTaskRule rule = RuleFromDraft(Guid.NewGuid().ToString("N"), input);
+                recurringState.RecurringRules.Add(rule);
+                TodoItem generated = GenerateToday(recurringState, rule, savedAt);
+                Commit(recurringState);
+                return generated == null ? null : TodoStateCopy.Copy(generated);
+            }
             var item = new TodoItem {
                 Id = Guid.NewGuid().ToString("N"), Text = input.Text, Notes = input.Notes, Priority = input.Priority,
                 DueDate = input.DueDate, HasDeadline = input.HasDeadline, HasTime = input.HasTime,
@@ -56,13 +67,212 @@ namespace CornerTodo
             int index = Find(id);
             TodoState next = Snapshot();
             TodoItem item = next.Items[index];
+            if (input.Recurrence != null && !String.IsNullOrEmpty(item.RecurringRuleId))
+                throw new ArgumentException("修改本次事项不会改变后续重复，请使用修改后续重复规则。");
             bool previouslyScheduled = item.HasDeadline;
             DateTime previousDeadline = TodoRules.Deadline(item);
             item.Text = input.Text; item.Notes = input.Notes; item.Priority = input.Priority;
             item.DueDate = input.DueDate; item.HasDeadline = input.HasDeadline; item.HasTime = input.HasTime;
             if (!item.HasDeadline) item.DeadlineSetAt = null;
             else if (!previouslyScheduled || TodoRules.Deadline(item) != previousDeadline) item.DeadlineSetAt = now();
+            if (input.Recurrence != null) {
+                if (next.RecurringRules.Count >= RecurringTasks.MaximumRuleCount) throw new InvalidOperationException("重复规则数量已达上限。");
+                RecurringTaskRule rule = RuleFromDraft(Guid.NewGuid().ToString("N"), input);
+                DateTime? first = RecurringTasks.NextOnOrAfter(rule, rule.Recurrence.StartDate);
+                if (!first.HasValue) throw new ArgumentException("重复计划超出可用日期范围。");
+                item.RecurringRuleId = rule.Id; item.OccurrenceDate = first.Value;
+                item.RepeatLabel = RecurringTasks.Label(rule.Recurrence);
+                // The existing task consumes only this occurrence, not uncreated history.
+                rule.ProcessedThrough = first.Value;
+                next.RecurringRules.Add(rule);
+            }
             Commit(next);
+        }
+
+        public RecurrenceSummary GetRecurrenceSummary()
+        {
+            DateTime today = RecurringTasks.LocalDate(now());
+            var summary = new RecurrenceSummary();
+            foreach (RecurringTaskRule rule in current.RecurringRules) AddRecurrenceSummary(summary, rule, today);
+            return summary;
+        }
+
+        public RecurrenceSummary GetRecurrenceSummary(string ruleId)
+        {
+            RecurringTaskRule rule = FindRule(current, ruleId);
+            var summary = new RecurrenceSummary();
+            AddRecurrenceSummary(summary, rule, RecurringTasks.LocalDate(now()));
+            return summary;
+        }
+
+        private static void AddRecurrenceSummary(RecurrenceSummary summary, RecurringTaskRule rule, DateTime today)
+        {
+            if (rule.IsPaused || rule.IsStopped) return;
+            DateTime? from = RecurringTasks.PendingStart(rule);
+            if (!from.HasValue || from.Value > today) return;
+            if (today > DateTime.MinValue.Date) summary.MissedCount += RecurringTasks.Count(rule, from.Value, today.AddDays(-1));
+            if (RecurringTasks.Count(rule, today, today) > 0) summary.DueTodayCount++;
+        }
+
+        /// <summary>Only generates a current occurrence when that rule has no unresolved past periods.</summary>
+        public int GenerateCurrentRecurrences()
+        {
+            DateTime stamp = now();
+            TodoState next = Snapshot();
+            int count = 0;
+            foreach (RecurringTaskRule rule in next.RecurringRules) {
+                if (count >= RecurringTasks.MaximumBatchSize) break;
+                TodoItem item = GenerateToday(next, rule, stamp);
+                if (item != null) count++;
+            }
+            if (count > 0 || !CursorsEqual(current, next)) Commit(next);
+            return count;
+        }
+
+        /// <summary>User acknowledgement: include missed periods, or skip them and generate only today.</summary>
+        public int ResolveMissedRecurrences(bool includeMissed)
+        {
+            DateTime stamp = now(), today = RecurringTasks.LocalDate(stamp);
+            TodoState next = Snapshot();
+            int generated = 0, processed = 0;
+            foreach (RecurringTaskRule rule in next.RecurringRules) {
+                if (processed >= RecurringTasks.MaximumBatchSize) break;
+                if (rule.IsPaused || rule.IsStopped) continue;
+                DateTime? from = RecurringTasks.PendingStart(rule);
+                if (!from.HasValue || from.Value > today) continue;
+                if (!includeMissed) {
+                    DateTime? occurrence = RecurringTasks.NextOnOrAfter(rule, today);
+                    if (occurrence.HasValue && occurrence.Value == today && from.Value <= today) {
+                        if (AddOccurrence(next, rule, today, stamp) != null) generated++;
+                        processed++;
+                    }
+                    rule.ProcessedThrough = Later(rule.ProcessedThrough, today);
+                    continue;
+                }
+                DateTime? due = RecurringTasks.NextOnOrAfter(rule, from.Value);
+                while (due.HasValue && due.Value <= today && processed < RecurringTasks.MaximumBatchSize) {
+                    if (AddOccurrence(next, rule, due.Value, stamp) != null) generated++;
+                    rule.ProcessedThrough = due.Value; processed++;
+                    if (due.Value == DateTime.MaxValue.Date) break;
+                    due = RecurringTasks.NextOnOrAfter(rule, due.Value.AddDays(1));
+                }
+            }
+            if (generated > 0 || !CursorsEqual(current, next)) Commit(next);
+            return generated;
+        }
+
+        public RecurringTaskRule GetRecurringRule(string id)
+        {
+            return RecurringTasks.Copy(FindRule(current, id));
+        }
+
+        public void EditRecurringRule(string id, TaskDraft draft)
+        {
+            TaskDraft input = ReadDraft(draft);
+            if (input.Recurrence == null) throw new ArgumentException("请设置重复方式；停止后续重复请使用停止操作。");
+            DateTime stamp = now();
+            TodoState next = Snapshot();
+            RecurringTaskRule originalRule = FindRule(next, id);
+            if (originalRule.IsStopped) throw new InvalidOperationException("此重复规则已停止。");
+            RequireNoMissed(originalRule, stamp);
+            RecurringTaskRule updated = RuleFromDraft(originalRule.Id, input);
+            // A current period belongs to the old rule even if a timer has not run yet.
+            GenerateToday(next, originalRule, stamp);
+            updated.IsPaused = originalRule.IsPaused;
+            updated.ProcessedThrough = Later(originalRule.ProcessedThrough, RecurringTasks.LocalDate(stamp));
+            next.RecurringRules[next.RecurringRules.IndexOf(originalRule)] = updated;
+            Commit(next);
+        }
+
+        public void SetRecurringPaused(string id, bool paused)
+        {
+            RecurringTaskRule previous = FindRule(current, id);
+            if (previous.IsStopped) throw new InvalidOperationException("此重复规则已停止。");
+            if (previous.IsPaused == paused) return;
+            DateTime stamp = now();
+            if (paused) RequireNoMissed(previous, stamp);
+            TodoState next = Snapshot(); RecurringTaskRule rule = FindRule(next, id);
+            if (paused) GenerateToday(next, rule, stamp);
+            rule.IsPaused = paused;
+            if (!paused) {
+                DateTime today = RecurringTasks.LocalDate(stamp);
+                if (today > DateTime.MinValue.Date) rule.ProcessedThrough = Later(rule.ProcessedThrough, today.AddDays(-1));
+            }
+            Commit(next);
+        }
+
+        public void StopRecurringRule(string id)
+        {
+            if (FindRule(current, id).IsStopped) return;
+            TodoState next = Snapshot(); RecurringTaskRule rule = FindRule(next, id);
+            rule.IsStopped = true; Commit(next);
+        }
+
+        private static RecurringTaskRule FindRule(TodoState state, string id)
+        {
+            RecurringTaskRule rule = state.RecurringRules.FirstOrDefault(candidate => String.Equals(candidate.Id, id, StringComparison.Ordinal));
+            if (rule == null) throw new KeyNotFoundException("此重复规则已不存在。");
+            return rule;
+        }
+
+        private void RequireNoMissed(RecurringTaskRule rule, DateTime stamp)
+        {
+            // Explicitly resolve the history before a future-only edit changes its cursor.
+            if (rule.IsPaused) return;
+            DateTime today = RecurringTasks.LocalDate(stamp);
+            DateTime? from = RecurringTasks.PendingStart(rule);
+            if (from.HasValue && today > DateTime.MinValue.Date && RecurringTasks.Count(rule, from.Value, today.AddDays(-1)) > 0)
+                throw new InvalidOperationException("此规则还有未处理的遗漏周期，请先处理遗漏任务，再修改或暂停后续规则。");
+        }
+
+        private static RecurringTaskRule RuleFromDraft(string id, TaskDraft input)
+        {
+            RecurrenceOptions options = RecurringTasks.Copy(input.Recurrence);
+            RecurringTasks.Validate(options);
+            DateTime localDue = input.DueDate.Kind == DateTimeKind.Utc ? input.DueDate.ToLocalTime() : input.DueDate;
+            int offset = input.HasDeadline ? (int)(localDue.Date - options.StartDate.Date).TotalDays : 0;
+            if (offset < 0) throw new ArgumentException("重复事项的截止日期不能早于开始日期。");
+            var rule = new RecurringTaskRule { Id = id, Text = input.Text, Notes = input.Notes, Priority = input.Priority,
+                HasDeadline = input.HasDeadline, HasTime = input.HasTime, DeadlineOffsetDays = offset,
+                DeadlineTimeTicks = input.HasTime ? localDue.TimeOfDay.Ticks : 0, Recurrence = options };
+            RecurringTasks.Validate(rule);
+            if (!RecurringTasks.NextOnOrAfter(rule, options.StartDate).HasValue) throw new ArgumentException("重复计划超出可用日期范围。");
+            return rule;
+        }
+
+        private static TodoItem GenerateToday(TodoState state, RecurringTaskRule rule, DateTime stamp)
+        {
+            if (rule.IsPaused || rule.IsStopped) return null;
+            DateTime today = RecurringTasks.LocalDate(stamp);
+            DateTime? from = RecurringTasks.PendingStart(rule);
+            if (!from.HasValue || from.Value > today) return null;
+            if (today > DateTime.MinValue.Date && RecurringTasks.Count(rule, from.Value, today.AddDays(-1)) > 0) return null;
+            DateTime? occurrence = RecurringTasks.NextOnOrAfter(rule, today);
+            if (!occurrence.HasValue || occurrence.Value != today) return null;
+            TodoItem item = AddOccurrence(state, rule, today, stamp);
+            rule.ProcessedThrough = today;
+            return item;
+        }
+
+        private static TodoItem AddOccurrence(TodoState state, RecurringTaskRule rule, DateTime date, DateTime stamp)
+        {
+            if (state.Items.Any(item => item.RecurringRuleId == rule.Id && item.OccurrenceDate == date)) return null;
+            string id = rule.Id + "_" + date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            if (state.Items.Any(item => item.Id == id)) throw new InvalidOperationException("重复事项标识冲突，尚未生成。");
+            var itemToAdd = new TodoItem { Id = id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority,
+                HasDeadline = rule.HasDeadline, HasTime = rule.HasTime,
+                DueDate = rule.HasDeadline ? date.AddDays(rule.DeadlineOffsetDays).AddTicks(rule.DeadlineTimeTicks) : DateTime.MinValue,
+                CreatedAt = stamp, DeadlineSetAt = rule.HasDeadline ? (DateTime?)stamp : null,
+                RecurringRuleId = rule.Id, OccurrenceDate = date, RepeatLabel = RecurringTasks.Label(rule.Recurrence) };
+            state.Items.Add(itemToAdd); return itemToAdd;
+        }
+
+        private static DateTime Later(DateTime first, DateTime second) { return first > second ? first : second; }
+        private static DateTime Later(DateTime? first, DateTime second) { return first.HasValue ? Later(first.Value, second) : second; }
+        private static bool CursorsEqual(TodoState first, TodoState second)
+        {
+            return first.RecurringRules.Count == second.RecurringRules.Count && first.RecurringRules.Zip(second.RecurringRules,
+                (a, b) => a.ProcessedThrough == b.ProcessedThrough).All(equal => equal);
         }
 
         public void SetCompleted(string id, bool completed)
@@ -162,7 +372,7 @@ namespace CornerTodo
             if (notes.Length > TodoRules.MaxNotesLength) throw new ArgumentException("备注最多可填写 " + TodoRules.MaxNotesLength + " 个字符。", "draft");
             return new TaskDraft { Text = draft.Text.Trim(), Notes = notes, Priority = draft.Priority,
                 HasDeadline = draft.HasDeadline, DueDate = draft.HasDeadline ? draft.DueDate : DateTime.MinValue,
-                HasTime = draft.HasDeadline && draft.HasTime };
+                HasTime = draft.HasDeadline && draft.HasTime, Recurrence = RecurringTasks.Copy(draft.Recurrence) };
         }
 
         private static bool Finite(double value)

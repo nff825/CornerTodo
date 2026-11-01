@@ -2,11 +2,19 @@
 
 放在 Windows 桌面右上角的本地待办工具。用一句话记录要做的事，选择截止日期，完成后勾选归档。可定制颜色与透明度的面板保留桌面观感，临近截止时会逐渐扩大，提醒你关注尚未完成的事项。
 
-当前 Windows 源码版本为 **v1.5.0**。另有独立的 Mac 实验性内测版，可下载文件以本仓库的 **Releases** 页面为准。
+当前 Windows 源码版本为 **v1.6.0**。另有独立的 Mac 实验性内测版，可下载文件以本仓库的 **Releases** 页面为准。
 
-v1.5.0 支持不设置截止日期：先记下事项，之后再补充日期。无日期事项保留备注和优先级，但不显示时间条、不计入临期或逾期，也不推动面板扩大。主面板滚动条改为简约半透明细条。小时／分钟点选、可选贴边收起、外观设置与登录自启继续保留。更新内容见 [更新记录](CHANGELOG.md)，开发者可从 [架构与构建说明](docs/DEVELOPMENT.md) 了解各组件的职责。
+v1.6.0 新增默认关闭的每日／每周／每月重复任务。勾选「重复任务」后才展开配置，每期独立保存，支持修改后续规则、暂停／恢复、停止与漏期处理。无截止日期、简约滚动条、时刻点选、可选贴边收起、外观设置与登录自启继续保留。更新内容见 [更新记录](CHANGELOG.md)，开发者可从 [架构与构建说明](docs/DEVELOPMENT.md) 了解各组件的职责。
 
-## v1.5.0 新交互
+## v1.6.0 重复任务
+
+| 默认关闭，普通事项只增加一行 | 勾选后展开每周设置 |
+| :---: | :---: |
+| [<img src="docs/images/recurring-editor-default.png" width="340" alt="实际WPF渲染：重复任务默认未勾选，配置区收起">](docs/images/recurring-editor-default.png) | [<img src="docs/images/recurring-editor-weekly.png" width="340" alt="实际WPF渲染：开启重复后选择星期和开始日期">](docs/images/recurring-editor-weekly.png) |
+| **列表中的重复事项** | **规则管理与暂停恢复** |
+| [<img src="docs/images/recurring-panel.png" width="340" alt="实际WPF渲染：普通与重复事项同屏，周期用次要文字标识">](docs/images/recurring-panel.png) | [<img src="docs/images/recurring-management.png" width="340" alt="实际WPF渲染：重复规则管理，查看下次日期并编辑暂停恢复">](docs/images/recurring-management.png) |
+
+## v1.5.0 无日期与滚动条
 
 | 有日期与无日期事项 | 无日期编辑窗口 |
 | :---: | :---: |
@@ -16,7 +24,7 @@ v1.5.0 支持不设置截止日期：先记下事项，之后再补充日期。�
 
 已发布的 **0.1.0-alpha.1** 面向 macOS 14+，提供 Apple M 系列与 Intel 两种包。见 [Mac 使用与构建说明](macOS/README.md) 和 [内测清单](macOS/TESTING.md)。Mac 尚待真机验收，未完成 Developer ID 签名和 Apple 公证。
 
-本次 v1.5.0 是 Windows 更新；共享规则和 Mac 开发分支已接入新版数据格式，旧 Mac 内测附件保持原样。**已发布的 Mac 0.1.0-alpha.1 不能读取 v1.5.0 保存的 Version 2 数据**，不要用它直接打开新格式的数据目录。以下功能与界面说明主要对应 Windows 版。
+本次 v1.6.0 是 Windows 更新。Mac 开发源码同步共享规则与 Version 3 数据保存兼容，但尚未提供周期生成、设置和管理界面；这不代表 Mac 重复功能已实现。旧 Mac 内测附件保持原样。**已发布的 Mac 0.1.0-alpha.1 不能读取新版数据**，不要用它直接打开新格式的数据目录。以下功能与界面说明主要对应 Windows 版。
 
 ## 界面预览
 
@@ -42,6 +50,7 @@ v1.5.0 支持不设置截止日期：先记下事项，之后再补充日期。�
 
 - 无边框、半透明的桌面面板，默认位于右上角，其他软件可覆盖它。
 - 外观设置：调整背景透明度、背景色和主要／次要文字颜色，提供浅色、深色和原版预设，实时预览后选择保存或取消。
+- 重复任务默认关闭，按需设置每日、每周多选星期或每月几号／月底，开始日期独立于截止日期；每一期独立记录，不因完成晚了而改变后续计划。
 - 输入完整事项，可不设置截止日期；需要时再选择日期与具体时刻，小时／分钟分别点选或键盘输入，句子中的人物和时间无需拆成字段。
 - 「未完成／已完成」两种状态。勾选后移入已完成区域并划线，取消勾选可恢复。
 - 双击或右键编辑，右键删除并确认；事项可添加多行纯文字备注，完成后仍保留。
@@ -55,13 +64,25 @@ v1.5.0 支持不设置截止日期：先记下事项，之后再补充日期。�
 
 ## 下载与运行
 
-在仓库的 **Releases** 中下载 `CornerTodo-v1.5.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
+在仓库的 **Releases** 中下载 `CornerTodo-v1.6.0-windows-portable.zip`，完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
 
-`CornerTodo-v1.5.0-source.zip` 是源码包，含 Windows 工程与 Mac 开发分支，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用 Windows 程序请选择名称含 `windows-portable` 的压缩包。
+`CornerTodo-v1.6.0-source.zip` 是源码包，含 Windows 工程与 Mac 开发分支，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用 Windows 程序请选择名称含 `windows-portable` 的压缩包。
 
 系统目标为 **Windows 10 / 11，.NET Framework 4.7.2 或更新版本**。应用使用 C# / WPF 与 Windows 自带的框架库，没有第三方运行时依赖。桌面层显示会受到 Explorer、其他桌面工具、多显示器和缩放配置的影响，尚未保证所有环境组合的兼容性；无法连接桌面层时会提示并以普通窗口显示。
 
 便携版尚未进行代码签名，Windows 或 SmartScreen 可能显示「未知发布者」等信任提示。请根据下载来源、源码和文件摘要决定是否运行，并保持系统防护开启。`SHA256SUMS.txt` 可用于核对文件是否一致，摘要本身不构成安全保证。
+
+## 重复任务
+
+新建或编辑普通事项时，默认只显示未勾选的「重复任务」一行。勾选后展开重复方式和开始日期：每日无需其他日期条件；每周可多选星期；每月可选1–31日或每月最后一天。取消勾选会收起当前草稿，点击保存才生效。重复日期负责生成，不是提醒时间；无截止日期的事项也可重复。
+
+每月29／30／31日遇到短月采用当月最后一天，后续月份恢复原定日期。计划固定在日历日期上，不随实际完成时间顺延。若有截止日期，每期使用首期截止相对开始日期的天数间隔，以及可选的具体时刻；开始日期后移时请核对截止日期与界面提示。
+
+程序运行或重新打开时检查到期计划；未来开始的规则保存在「⋯ → 管理重复任务」，不会提前展开全部未来事项。每期事项、完成记录与当时的循环标签独立保留；上一期未完成不覆盖、不阻止新一期，删除本次后也不会在重启时重新生成。
+
+右键重复事项可选择编辑本次、修改后续规则、暂停／恢复、停止后续或删除本次；修改本次不改变模板，修改后续不改变已有事项。管理窗口可查看下次生成日期。暂停或修改规则前须先处理已存在的漏期；恢复从当前计划继续，不追补暂停期间。停止会取消后续生成及尚未生成的遗漏周期，已生成事项和完成历史保留。
+
+重新打开遇到遗漏周期时，汇总后选择「补建」「跳过」或「稍后处理」。每批最多补建366项，剩余遗漏继续待处理；稍后不会推进处理进度。程序退出或电脑关机期间不运行生成，**本版不包含到点通知或声音提醒**。
 
 ## 开机自启（登录后）
 
@@ -148,9 +169,9 @@ v1.5.0 支持不设置截止日期：先记下事项，之后再补充日期。�
 
 v1.4.0 及更早的旧事项、截止日期与已有设置继续读取。旧数据缺少贴边字段时默认关闭；缺少备注、优先级或排序字段时采用空备注、中优先级和截止时间优先。升级前先退出旧程序并单独备份整个 `Data`，再替换程序文件、保留原数据。
 
-v1.5.0 使用 Version 2 数据格式，无日期状态显式保存，旧 Version 1 数据载入时在内存迁移，首次成功保存才写新版。未知版本会保留原文件并明确报错。**v1.4.0 及更早的 Windows 程序、已发布 Mac 0.1.0-alpha.1 不支持 Version 2；回退必须先恢复升级前的整个 Data 备份，再运行旧程序。** `todos.json.bak` 是滚动保存备份，不能代替单独保留的升级前备份。
+v1.6.0 使用 Version 3 数据格式，重复规则、处理进度与每期事项一起原子保存。旧 Version 1／2 数据载入时只在内存迁移，首次成功保存才写新版。未知版本保留原文件并明确报错。**v1.5.0 及更早的 Windows 程序、已发布 Mac 0.1.0-alpha.1 不支持 Version 3；回退必须先恢复升级前的整个 Data 备份，再运行旧程序。** `todos.json.bak` 是滚动保存备份，不能代替单独保留的升级前备份。
 
-当前 Windows 功能面向本机使用，不包含周期任务、手机端、跨设备同步、提醒通知、附件、富文本或子任务；Mac 内测独立分发。
+当前 Windows 功能面向本机使用，不包含手机端、跨设备同步、提醒通知、附件、富文本或子任务；Mac 内测独立分发。
 
 ## 本地工作区目录
 
@@ -166,7 +187,7 @@ v1.5.0 使用 Version 2 数据格式，无日期状态显式保存，旧 Version
 | `archive/packages` | 历次打包结果和回退存档 |
 | `output` 下其他目录 | 测试记录、界面渲染和验证产物 |
 
-`release/v1.5.0` 是版本容器，内部文件保留 `CornerTodo-v1.5.0-…` 完整名称。重复打包时，上一批文件会存入 `archive/packages/v版本号/previous-bundles-*`；它们是发布文件备份，待办数据备份仍在对应的 `Data` 内。`dist`、`release`、`archive` 和开发输出均留在本机。
+`release/v1.6.0` 是版本容器，内部文件保留 `CornerTodo-v1.6.0-…` 完整名称。重复打包时，上一批文件会存入 `archive/packages/v版本号/previous-bundles-*`；它们是发布文件备份，待办数据备份仍在对应的 `Data` 内。`dist`、`release`、`archive` 和开发输出均留在本机。
 
 ## 从源码构建
 
@@ -188,12 +209,13 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory output\dev
 
 需要在 IDE 中阅读和调试时，打开 `CornerTodo.sln`。这是 **.NET Framework 4.7.2、C# 5、AnyCPU** 的传统 WPF 工程，开发环境需要相应的 Visual Studio／MSBuild 和 4.7.2 Targeting Pack。IDE 构建输出为 `bin\Debug` 或 `bin\Release`，不覆盖 `dist`；直接运行便携版不需要安装这些开发工具。
 
-共享清单目前登记十一组功能测试，也可单独运行：
+共享清单目前登记十二组功能测试，也可单独运行：
 
 | 测试 | 命令 | 范围 |
 | --- | --- | --- |
 | 数据与截止规则 | `powershell -NoProfile -File .\tests\Run-StoreTests.ps1` | 保存、恢复、旧字段默认、贴边偏好往返、两种排序、线性时间进度、截止边界及紧迫程度 |
 | 任务操作服务（Session） | `powershell -NoProfile -File .\tests\Run-SessionTests.ps1` | 备注／优先级／排序／贴边设置保存、命令与时间戳规则、保存失败不提交、快照隔离、预览无写盘；不创建 WPF 窗口 |
+| 重复计划与生成 | `powershell -NoProfile -File .\tests\Run-RecurrenceTests.ps1` | 日／周／月、短月闰年、去重、历史保留、漏期分批、暂停恢复与失败事务 |
 | 增长布局 | `powershell -NoProfile -File .\tests\Run-GrowthLayoutTests.ps1` | 尺寸上限、锚点、屏幕边界、DPI 与异常输入 |
 | 面板交互控制器（Panel） | `powershell -NoProfile -File .\tests\Run-PanelTests.ps1` | 假屏幕宿主、可控时钟下的拖动、增长动画、贴边延迟收起／恢复及基准尺寸；不挂载桌面 |
 | 面板视图（View） | `powershell -NoProfile -File .\tests\Run-ViewTests.ps1` | 控件树、胶囊计数、时刻点选和校验、事项呈现及操作意图转发；不显示窗口 |
@@ -225,16 +247,16 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory output\dev
 维护者可运行下面的命令。脚本会从公开源码清单建立干净副本，在副本中构建并运行现有测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.5.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.6.0
 ```
 
-默认按 `VERSION` 输出到对应的 `release\v版本号`，本版产物位于 `release\v1.5.0`；仍可使用 `-OutputDirectory` 指定其他项目内目录：
+默认按 `VERSION` 输出到对应的 `release\v版本号`，本版产物位于 `release\v1.6.0`；仍可使用 `-OutputDirectory` 指定其他项目内目录：
 
-- `CornerTodo-v1.5.0-source.zip`
-- `CornerTodo-v1.5.0-windows-portable.zip`
+- `CornerTodo-v1.6.0-source.zip`
+- `CornerTodo-v1.6.0-windows-portable.zip`
 - `SHA256SUMS.txt`
 
-`release\v1.5.0\CornerTodo-v1.5.0-source` 保留包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。从 v1.4.0 仓库更新时沿用现有目录结构；确认源码更新完整后，再创建 v1.5.0 标签，并保留 v1.4.0 及更早的 Release 和标签。发布前运行全部测试，并核对本次 `PACKAGE-REPORT.txt` 与文件摘要。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
+`release\v1.6.0\CornerTodo-v1.6.0-source` 保留包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。从 v1.5.0 仓库更新时沿用现有目录结构；确认源码更新完整后，再创建 v1.6.0 标签，并保留 v1.5.0 及更早的 Release 和标签。发布前运行全部测试，并核对本次 `PACKAGE-REPORT.txt` 与文件摘要。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
 
 ## 许可证
 

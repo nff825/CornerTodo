@@ -596,7 +596,7 @@ internal static class SessionTests
     {
         var writer = new RecordingStore(); TodoState legacy = Fixture(); legacy.Version = 1;
         var legacySession = new TodoSession(writer, legacy, false, delegate { return Epoch; });
-        Assert(writer.Arguments.Count == 0 && legacy.Version == 1 && legacySession.Snapshot().Version == 2 && Only(legacySession).HasDeadline,
+        Assert(writer.Arguments.Count == 0 && legacy.Version == 1 && legacySession.Snapshot().Version == TodoState.CurrentVersion && Only(legacySession).HasDeadline,
             "Constructing a legacy session wrote data, changed the source state or lost its deadline.");
         TodoStore store = new TodoStore(Path.Combine(temporaryRoot, "no-deadline-restart"));
         var session = new TodoSession(store, legacySession.Snapshot(), false, delegate { return Epoch; });

@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Interop;
@@ -46,6 +47,7 @@ internal static class OffscreenUiTests
             ValidateLegacyUtcEditor();
             ValidateSortPersistence();
             RenderOptionalDeadlinePreviews(now);
+            RenderRecurringPreviews(now);
             EdgeUiTests.Run(outputDirectory);
             Report.AppendLine("PASS: " + assertions + " assertions across 3 deadline scenarios and optional-deadline theme/editor renders.");
             Report.AppendLine("Scope: control tree, layout, typography, counts, completed decoration, settings state, render pixels and fake-host baseline persistence.");
@@ -201,6 +203,118 @@ internal static class OffscreenUiTests
         }
         finally { editor.Close(); }
         Report.AppendLine("  optional deadline previews: light/dark/transparent overflow lists and undated editor rendered with production controls.");
+    }
+
+    private static void RenderRecurringPreviews(DateTime now)
+    {
+        // Keep all recurrence examples on the same processed Monday, independent
+        // of the machine clock used by the other deadline scenarios.
+        now = new DateTime(2026, 11, 2, 10, 0, 0);
+        TaskEditor compact = new TaskEditor(new TodoItem { Text = "整理研究记录", HasDeadline = false });
+        try {
+            RenderRecurringWindow(compact, "recurring-editor-default");
+            Assert(!Field<CheckBox>(compact, "useRecurrence").IsChecked.Value && Field<StackPanel>(compact, "recurrenceFields").Visibility == Visibility.Collapsed,
+                "Recurring default preview must be compact and unchecked.");
+        } finally { compact.Close(); }
+        TaskEditor expanded = new TaskEditor(new TodoItem { Text = "整理研究记录", HasDeadline = false });
+        try {
+            Field<CheckBox>(expanded, "useRecurrence").IsChecked = true;
+            Field<ComboBox>(expanded, "recurrenceFrequency").SelectedIndex = 1;
+            CheckBox[] days = Field<CheckBox[]>(expanded, "weekDays");
+            for (int index = 0; index < days.Length; index++) days[index].IsChecked = index == 1 || index == 5;
+            Field<DatePicker>(expanded, "recurrenceStart").SelectedDate = now.Date.AddDays(((int)DayOfWeek.Monday - (int)now.DayOfWeek + 7) % 7);
+            RenderRecurringWindow(expanded, "recurring-editor-weekly");
+            Assert(Field<StackPanel>(expanded, "recurrenceFields").Visibility == Visibility.Visible && expanded.Height > compact.Height,
+                "Enabled recurring preview did not expand.");
+        } finally { expanded.Close(); }
+        var state = new TodoState(); state.Settings.AutoExpand = false;
+        var weekly = new RecurringTaskRule { Id = "preview-weekly", Text = "整理研究记录", HasDeadline = false,
+            Recurrence = new RecurrenceOptions { Frequency = RecurrenceFrequency.Weekly, WeekDays = 34, StartDate = now.Date.AddDays(-7) }, ProcessedThrough = now.Date };
+        var daily = new RecurringTaskRule { Id = "preview-daily", Text = "阅读新方向文献", HasDeadline = false, IsPaused = true,
+            Recurrence = new RecurrenceOptions { Frequency = RecurrenceFrequency.Daily, StartDate = now.Date.AddDays(-7) }, ProcessedThrough = now.Date };
+        var monthly = new RecurringTaskRule { Id = "preview-monthly", Text = "核对月度报销", HasDeadline = false,
+            Recurrence = new RecurrenceOptions { Frequency = RecurrenceFrequency.Monthly, DayOfMonth = 10, StartDate = now.Date }, ProcessedThrough = now.Date };
+        state.RecurringRules.Add(weekly); state.RecurringRules.Add(daily); state.RecurringRules.Add(monthly);
+        state.Items.Add(Item("recurring-dated", "向李老师汇报研究进展", now.Date.AddHours(17), now.AddDays(-2), false));
+        state.Items[0].Priority = TaskPriority.High;
+        state.Items.Add(Item("recurring-report", "提交本月研究小结", new DateTime(2026, 11, 10), now.AddDays(-3), false));
+        DateTime occurrence = now.Date;
+        while ((weekly.Recurrence.WeekDays & (1 << (int)occurrence.DayOfWeek)) == 0) occurrence = occurrence.AddDays(-1);
+        state.Items.Add(new TodoItem { Id = "recurring-weekly-item", Text = weekly.Text, HasDeadline = false, CreatedAt = occurrence,
+            RecurringRuleId = weekly.Id, OccurrenceDate = occurrence, RepeatLabel = RecurringTasks.Label(weekly.Recurrence) });
+        state.Items.Add(new TodoItem { Id = "recurring-daily-item", Text = daily.Text, HasDeadline = false, CreatedAt = now.Date,
+            RecurringRuleId = daily.Id, OccurrenceDate = now.Date, RepeatLabel = RecurringTasks.Label(daily.Recurrence), Priority = TaskPriority.Low });
+        state.Items.Add(new TodoItem { Id = "recurring-completed", Text = "归档阶段实验记录", HasDeadline = false, CreatedAt = now.AddDays(-2), IsCompleted = true, CompletedAt = now.AddHours(-1) });
+        var panel = new TodoPanelView(new TodoViewActions());
+        TextElement.SetFontFamily(panel.Surface, new FontFamily("Microsoft YaHei UI")); panel.Render(state, now, true, null);
+        var canvas = new Grid { Background = Theme.Brush("#AFCFD9") }; canvas.Children.Add(panel.Surface);
+        WritePreview(canvas, 430, 570, "recurring-panel");
+        Assert(Descendants(canvas).OfType<TextBlock>().Any(text => text.Text.Contains("↻ 每周")), "Recurring panel omitted its compact loop label.");
+        var manager = new RecurringTasksWindow(delegate { return TodoStateCopy.Copy(state); }, null, null, null, null, delegate { return now; });
+        try {
+            RenderRecurringWindow(manager, "recurring-management");
+            manager.Width = 320; manager.Height = 280;
+            RenderRecurringWindow(manager, "recurring-management-small");
+        }
+        finally { manager.Close(); }
+        var catchUp = new RecurrenceCatchUpWindow(8, 2, delegate { return false; });
+        try { RenderRecurringWindow(catchUp, "recurring-catch-up"); }
+        finally { catchUp.Close(); }
+        Report.AppendLine("  recurring previews: compact/weekly editors, mixed list, rules management and catch-up choices rendered with production controls.");
+    }
+
+    private static void RenderRecurringWindow(Window window, string name)
+    {
+        FrameworkElement content = (FrameworkElement)window.Content; window.Content = null;
+        TextElement.SetFontFamily(content, window.FontFamily); TextElement.SetFontSize(content, window.FontSize);
+        // Preserve inherited layout rounding when moving the real content out of
+        // its unshown Window; otherwise fractional button positions can look cut
+        // in a 150% bitmap even though the native Window rounds its layout.
+        var canvas = new Grid { Background = window.Background, UseLayoutRounding = window.UseLayoutRounding,
+            SnapsToDevicePixels = window.SnapsToDevicePixels }; canvas.Children.Add(content);
+        try {
+            WritePreview(canvas, window.Width, window.Height, name);
+            foreach (Button button in Descendants(canvas).OfType<Button>().Where(button => AutomationProperties.GetName(button) == "保存待办" || AutomationProperties.GetName(button) == "关闭重复任务管理")) {
+                Rect bounds = button.TransformToAncestor(canvas).TransformBounds(new Rect(button.RenderSize));
+                Assert(bounds.Bottom <= canvas.ActualHeight + 1 && bounds.Right <= canvas.ActualWidth + 1, name + ": footer action clipped.");
+            }
+            if (window is RecurringTasksWindow) {
+                var scroll = Descendants(canvas).OfType<ScrollViewer>().Single(view => AutomationProperties.GetName(view) == "重复规则列表");
+                ValidateRecurringActionLayout(canvas, scroll, name, false);
+                if (scroll.ScrollableHeight > 0) {
+                    scroll.ScrollToBottom(); canvas.UpdateLayout();
+                    ValidateRecurringActionLayout(canvas, scroll, name, true);
+                    WritePreview(canvas, window.Width, window.Height, name + "-bottom");
+                }
+            }
+            Assert(new WindowInteropHelper(window).Handle == IntPtr.Zero, name + ": created a native window.");
+        }
+        finally { canvas.Children.Clear(); window.Content = content; }
+    }
+
+    private static void ValidateRecurringActionLayout(FrameworkElement canvas, ScrollViewer scroll, string name, bool bottom)
+    {
+        Button[] commands = Descendants(scroll).OfType<Button>().Where(button =>
+            AutomationProperties.GetName(button).StartsWith("编辑后续规则：", StringComparison.Ordinal) ||
+            AutomationProperties.GetName(button).StartsWith("切换重复规则：", StringComparison.Ordinal) ||
+            AutomationProperties.GetName(button).StartsWith("停止后续重复：", StringComparison.Ordinal)).ToArray();
+        Assert(commands.Length == 9, name + ": each of three rules must retain all three actions.");
+        Button[] row = bottom ? commands.Skip(commands.Length - 3).ToArray() : scroll.ScrollableHeight <= 0 ? commands : commands.Take(3).ToArray();
+        Rect viewport = scroll.TransformToAncestor(canvas).TransformBounds(new Rect(scroll.RenderSize));
+        double previousBottom = Double.NegativeInfinity;
+        foreach (Button button in row) {
+            Rect bounds = button.TransformToAncestor(canvas).TransformBounds(new Rect(button.RenderSize));
+            Assert(bounds.Width > 0 && bounds.Height >= 20 && bounds.Top >= previousBottom - 0.1,
+                name + ": action buttons overlap or collapse.");
+            previousBottom = bounds.Bottom;
+            Assert(bounds.Left >= viewport.Left - 1 && bounds.Right <= viewport.Right + 1 && bounds.Top >= viewport.Top - 1 && bounds.Bottom <= viewport.Bottom + 1,
+                name + ": top/bottom rule actions were clipped by their scrolling viewport.");
+            var presenter = Descendants(button).OfType<ContentPresenter>().Single();
+            Assert(presenter.ActualHeight >= 16 && presenter.ActualWidth > 0 && presenter.Clip == null,
+                name + ": caption presenter clips its text.");
+            Report.AppendLine("  " + name + " " + button.Content + ": y=" + bounds.Y.ToString("0.###", CultureInfo.InvariantCulture) +
+                ", h=" + bounds.Height.ToString("0.###", CultureInfo.InvariantCulture) + ", caption=" + presenter.ActualHeight.ToString("0.###", CultureInfo.InvariantCulture));
+        }
     }
 
     private static void WritePreview(Grid canvas, double width, double height, string name)

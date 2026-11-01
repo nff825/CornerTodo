@@ -930,12 +930,12 @@ internal static class StoreTests
         state.Items.Add(undated); state.Settings.SortMode = TaskSortMode.Priority;
         store.Save(state);
         string json = File.ReadAllText(store.DataFilePath);
-        Assert(json.Contains("\"Version\":2") && json.Contains("\"HasDeadline\":false") && json.Contains("\"DueDate\":null"),
+        Assert(json.Contains("\"Version\":" + TodoState.CurrentVersion) && json.Contains("\"HasDeadline\":false") && json.Contains("\"DueDate\":null"),
             "Unscheduled data did not explicitly serialize a missing deadline in schema two.");
         Assert(!json.Contains("0001-") && !json.Contains("9999-"), "Unscheduled data stored a fake calendar date.");
         TodoStore restarted = new TodoStore(Path.GetDirectoryName(store.DataFilePath));
         TodoState loaded = restarted.Load(); TodoItem actual = loaded.Items.Single(i => i.Id == undated.Id);
-        Assert(loaded.Version == 2 && loaded.Items.Count == 2 && restarted.LoadWarning == null, "Mixed deadlines failed to reload cleanly.");
+        Assert(loaded.Version == TodoState.CurrentVersion && loaded.Items.Count == 2 && restarted.LoadWarning == null, "Mixed deadlines failed to reload cleanly.");
         Assert(!actual.HasDeadline && actual.DueDate == DateTime.MinValue && !actual.HasTime && !actual.DeadlineSetAt.HasValue,
             "Unscheduled state gained scheduling information on restart.");
         Assert(actual.Text == undated.Text && actual.Notes == undated.Notes && actual.Priority == undated.Priority &&
@@ -960,13 +960,13 @@ internal static class StoreTests
             File.WriteAllText(store.DataFilePath, "{" + (explicitVersion ? "\"Version\":1," : "") + itemJson + "}", Encoding.UTF8);
             byte[] before = File.ReadAllBytes(store.DataFilePath); TodoState loaded = store.Load();
             TodoItem item = loaded.Items.Single();
-            Assert(loaded.Version == 2 && item.HasDeadline && item.HasTime && item.DueDate.Kind == DateTimeKind.Utc &&
+            Assert(loaded.Version == TodoState.CurrentVersion && item.HasDeadline && item.HasTime && item.DueDate.Kind == DateTimeKind.Utc &&
                 item.DueDate.Ticks == DateTime.Parse("2026-11-02T17:23:45.1234567Z", null, System.Globalization.DateTimeStyles.RoundtripKind).Ticks,
                 "Legacy date precision, Kind or presence changed during migration.");
             Assert(store.LoadWarning == null && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)) && !File.Exists(store.DataFilePath + ".bak"),
                 "Loading legacy data wrote files or treated it as corruption.");
             store.Save(loaded);
-            Assert(File.ReadAllText(store.DataFilePath).Contains("\"Version\":2") &&
+            Assert(File.ReadAllText(store.DataFilePath).Contains("\"Version\":" + TodoState.CurrentVersion) &&
                 before.SequenceEqual(File.ReadAllBytes(store.DataFilePath + ".bak")), "The first new save did not preserve the legacy generation.");
         }
     }
@@ -1051,7 +1051,7 @@ internal static class StoreTests
     private static void FutureSchemaProtection()
     {
         TodoStore store = Store("future-schema-protection"); store.Save(State("旧备份")); store.Save(State("当前文件"));
-        string future = File.ReadAllText(store.DataFilePath).Replace("\"Version\":2", "\"Version\":99");
+        string future = File.ReadAllText(store.DataFilePath).Replace("\"Version\":" + TodoState.CurrentVersion, "\"Version\":99");
         File.WriteAllText(store.DataFilePath, future, Encoding.UTF8);
         byte[] main = File.ReadAllBytes(store.DataFilePath), backup = File.ReadAllBytes(store.DataFilePath + ".bak");
         bool rejected = false; try { store.Load(); } catch (NotSupportedException error) { rejected = error.Message.Contains("99"); }

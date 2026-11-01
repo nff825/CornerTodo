@@ -16,6 +16,7 @@ namespace CornerTodo
     {
         private readonly TodoViewActions actions;
         private readonly List<Action<DateTime>> timeRefreshers = new List<Action<DateTime>>();
+        private Dictionary<string, RecurringTaskRule> recurringRules = new Dictionary<string, RecurringTaskRule>(StringComparer.Ordinal);
         internal StackPanel List { get; private set; }
 
         internal TaskListView(TodoViewActions actions)
@@ -29,6 +30,7 @@ namespace CornerTodo
         {
             List.Children.Clear();
             timeRefreshers.Clear();
+            recurringRules = state.RecurringRules.ToDictionary(rule => rule.Id, StringComparer.Ordinal);
             var pending = TodoRules.Pending(state).ToList();
             var completed = TodoRules.Completed(state).ToList();
             var section = new Grid { Margin = new Thickness(0, 0, 0, 7) };
@@ -112,7 +114,7 @@ namespace CornerTodo
                 details.Children.Add(note);
             }
             Grid.SetColumn(details, 1); titleLine.Children.Add(details); textArea.Children.Add(titleLine);
-            var due = Theme.Text(TodoRules.FormatAttention(item, now), overdue || urgent ? 13 : 12, overdue ? palette.Warning : urgent ? palette.Urgent : palette.Muted);
+            var due = Theme.Text(AttentionLabel(item, now), overdue || urgent ? 13 : 12, overdue ? palette.Warning : urgent ? palette.Urgent : palette.Muted);
             due.Tag = "deadline";
             due.Margin = new Thickness(0, 4, 0, 0);
             textArea.Children.Add(due);
@@ -120,20 +122,34 @@ namespace CornerTodo
             Grid.SetColumn(textArea, 1); row.Children.Add(textArea);
             DateTime localDue = item.DueDate.Kind == DateTimeKind.Utc ? item.DueDate.ToLocalTime() : item.DueDate;
             string description = item.Text + (item.HasDeadline ? "\n截止：" + localDue.ToString(item.HasTime ? "yyyy年M月d日 HH:mm" : "yyyy年M月d日") : "\n未设截止");
+            if (!String.IsNullOrEmpty(item.RepeatLabel)) description += "\n重复：" + item.RepeatLabel;
             var rowTip = new ToolTip { Content = description + (item.IsCompleted || !item.HasDeadline ? "" : "\n" + ProgressLabel(item, now)) };
             row.ToolTip = rowTip;
             if (!item.IsCompleted && item.HasDeadline) timeRefreshers.Add(delegate(DateTime current) {
                 bool past = TodoRules.IsOverdue(item, current), soon = TodoRules.IsUrgent(item, current);
-                due.Text = TodoRules.FormatAttention(item, current);
+                due.Text = AttentionLabel(item, current);
                 due.Foreground = past ? palette.Warning : soon ? palette.Urgent : palette.Muted;
                 rowTip.Content = description + "\n" + ProgressLabel(item, current);
             });
             var menu = new ContextMenu();
-            var edit = new MenuItem { Header = "编辑" }; edit.Click += delegate { if (actions.Edit != null) actions.Edit(item); };
+            bool repeated = !String.IsNullOrEmpty(item.RecurringRuleId);
+            var edit = new MenuItem { Header = repeated ? "编辑本次事项" : "编辑" }; edit.Click += delegate { if (actions.Edit != null) actions.Edit(item); };
             var toggle = new MenuItem { Header = item.IsCompleted ? "恢复为未完成" : "标记为已完成" };
             toggle.Click += delegate { if (actions.SetCompleted != null) actions.SetCompleted(item, !item.IsCompleted); };
-            var delete = new MenuItem { Header = "删除" }; delete.Click += delegate { if (actions.Delete != null) actions.Delete(item); };
-            menu.Items.Add(edit); menu.Items.Add(toggle); menu.Items.Add(new Separator()); menu.Items.Add(delete);
+            var delete = new MenuItem { Header = repeated ? "删除本次事项…" : "删除" }; delete.Click += delegate { if (actions.Delete != null) actions.Delete(item); };
+            menu.Items.Add(edit); menu.Items.Add(toggle);
+            RecurringTaskRule rule;
+            if (repeated && recurringRules.TryGetValue(item.RecurringRuleId, out rule) && !rule.IsStopped) {
+                var editRule = new MenuItem { Header = "修改后续重复规则" };
+                editRule.Click += delegate { if (actions.EditRecurringRule != null) actions.EditRecurringRule(item); }; menu.Items.Add(editRule);
+                menu.Items.Add(new Separator());
+                bool pauseRequested = !rule.IsPaused;
+                var pause = new MenuItem { Header = rule.IsPaused ? "恢复后续生成" : "暂停后续生成" };
+                pause.Click += delegate { if (actions.SetRecurringPaused != null) actions.SetRecurringPaused(item, pauseRequested); }; menu.Items.Add(pause);
+                var stop = new MenuItem { Header = "停止后续重复…" };
+                stop.Click += delegate { if (actions.StopRecurringRule != null) actions.StopRecurringRule(item); }; menu.Items.Add(stop);
+            }
+            menu.Items.Add(new Separator()); menu.Items.Add(delete);
             if (actions.TrackMenu != null) actions.TrackMenu(menu);
             row.ContextMenu = menu;
             textArea.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) {
@@ -170,6 +186,11 @@ namespace CornerTodo
         private static string SortLabel(TaskSortMode value)
         {
             return value == TaskSortMode.Priority ? "优先级优先" : "截止时间优先";
+        }
+
+        private static string AttentionLabel(TodoItem item, DateTime now)
+        {
+            return TodoRules.FormatAttention(item, now) + (String.IsNullOrEmpty(item.RepeatLabel) ? "" : " · ↻ " + item.RepeatLabel);
         }
 
         private static string ProgressLabel(TodoItem item, DateTime now)

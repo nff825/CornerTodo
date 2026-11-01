@@ -23,6 +23,9 @@ namespace CornerTodo
         public bool HasDeadline { get; set; }
         public bool HasTime { get; set; }
         public DateTime? DeadlineSetAt { get; set; }
+        public string RecurringRuleId { get; set; }
+        public DateTime? OccurrenceDate { get; set; }
+        public string RepeatLabel { get; set; }
     }
 
     public sealed class WidgetSettings
@@ -51,17 +54,19 @@ namespace CornerTodo
 
     public sealed class TodoState
     {
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 3;
 
         public TodoState()
         {
             Version = CurrentVersion;
             Items = new List<TodoItem>();
+            RecurringRules = new List<RecurringTaskRule>();
             Settings = new WidgetSettings();
         }
 
         public int Version { get; set; }
         public List<TodoItem> Items { get; set; }
+        public List<RecurringTaskRule> RecurringRules { get; set; }
         public WidgetSettings Settings { get; set; }
     }
 

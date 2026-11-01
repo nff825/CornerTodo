@@ -158,14 +158,32 @@ namespace CornerTodo
                     { "CompletedAt", item.CompletedAt.HasValue ? DateText(item.CompletedAt.Value) : null },
                     { "HasDeadline", item.HasDeadline },
                     { "DueDate", item.HasDeadline ? DateText(item.DueDate) : null }, { "HasTime", item.HasTime },
-                    { "DeadlineSetAt", item.DeadlineSetAt.HasValue ? DateText(item.DeadlineSetAt.Value) : null }
+                    { "DeadlineSetAt", item.DeadlineSetAt.HasValue ? DateText(item.DeadlineSetAt.Value) : null },
+                    { "RecurringRuleId", item.RecurringRuleId },
+                    { "OccurrenceDate", item.OccurrenceDate.HasValue ? DateText(item.OccurrenceDate.Value) : null },
+                    { "RepeatLabel", item.RepeatLabel }
+                });
+            }
+            List<object> rules = new List<object>();
+            foreach (RecurringTaskRule rule in state.RecurringRules) {
+                RecurrenceOptions repeat = rule.Recurrence;
+                rules.Add(new Dictionary<string, object> {
+                    { "Id", rule.Id }, { "Text", rule.Text }, { "Notes", rule.Notes ?? "" }, { "Priority", (int)rule.Priority },
+                    { "HasDeadline", rule.HasDeadline }, { "HasTime", rule.HasTime },
+                    { "DeadlineOffsetDays", rule.DeadlineOffsetDays }, { "DeadlineTimeTicks", rule.DeadlineTimeTicks },
+                    { "IsPaused", rule.IsPaused }, { "IsStopped", rule.IsStopped },
+                    { "ProcessedThrough", rule.ProcessedThrough.HasValue ? DateText(rule.ProcessedThrough.Value) : null },
+                    { "Recurrence", new Dictionary<string, object> {
+                        { "Frequency", (int)repeat.Frequency }, { "WeekDays", repeat.WeekDays },
+                        { "DayOfMonth", repeat.DayOfMonth }, { "UseLastDay", repeat.UseLastDay }, { "StartDate", DateText(repeat.StartDate) }
+                    } }
                 });
             }
             WidgetSettings settings = state.Settings;
             AppearanceSettings appearance = AppearanceSettings.Normalize(settings.Appearance);
             return new Dictionary<string, object>
             {
-                { "Version", TodoState.CurrentVersion }, { "Items", items },
+                { "Version", TodoState.CurrentVersion }, { "Items", items }, { "RecurringRules", rules },
                 { "Settings", new Dictionary<string, object>
                     {
                         { "Left", settings.Left }, { "Top", settings.Top },
@@ -229,7 +247,35 @@ namespace CornerTodo
                     model.CompletedAt = ParseDate(value, "CompletedAt");
                 if (item.TryGetValue("DeadlineSetAt", out value) && value != null)
                     model.DeadlineSetAt = ParseDate(value, "DeadlineSetAt");
+                model.RecurringRuleId = OptionalText(item, "RecurringRuleId");
+                model.RepeatLabel = OptionalText(item, "RepeatLabel");
+                if (item.TryGetValue("OccurrenceDate", out value) && value != null) model.OccurrenceDate = ParseDate(value, "OccurrenceDate");
                 state.Items.Add(model);
+            }
+
+            if (root.TryGetValue("RecurringRules", out value) && value != null) {
+                if (!(value is IEnumerable) || value is string || value is IDictionary) throw new InvalidDataException("重复规则列表无效。");
+                foreach (object entry in (IEnumerable)value) {
+                    IDictionary<string, object> fields = AsObject(entry, "重复规则");
+                    object repeatValue;
+                    if (!fields.TryGetValue("Recurrence", out repeatValue)) throw new InvalidDataException("重复规则缺少周期设置。");
+                    IDictionary<string, object> repeat = AsObject(repeatValue, "周期设置");
+                    var rule = new RecurringTaskRule {
+                        Id = RequiredString(fields, "Id"), Text = RequiredString(fields, "Text"), Notes = OptionalNotes(fields),
+                        Priority = (TaskPriority)Integer(fields, "Priority", 2), HasDeadline = Boolean(fields, "HasDeadline", false),
+                        HasTime = Boolean(fields, "HasTime", false), DeadlineOffsetDays = Integer(fields, "DeadlineOffsetDays", 0),
+                        DeadlineTimeTicks = LongInteger(fields, "DeadlineTimeTicks", 0),
+                        IsPaused = Boolean(fields, "IsPaused", false), IsStopped = Boolean(fields, "IsStopped", false),
+                        Recurrence = new RecurrenceOptions {
+                            Frequency = (RecurrenceFrequency)Integer(repeat, "Frequency", 0),
+                            WeekDays = Integer(repeat, "WeekDays", 2), DayOfMonth = Integer(repeat, "DayOfMonth", 1),
+                            UseLastDay = Boolean(repeat, "UseLastDay", false), StartDate = RequiredDate(repeat, "StartDate")
+                        }
+                    };
+                    object cursor;
+                    if (fields.TryGetValue("ProcessedThrough", out cursor) && cursor != null) rule.ProcessedThrough = ParseDate(cursor, "ProcessedThrough");
+                    state.RecurringRules.Add(rule);
+                }
             }
 
             if (root.TryGetValue("Settings", out value) && value != null)
@@ -272,7 +318,17 @@ namespace CornerTodo
         {
             if (state == null) throw new ArgumentNullException("state");
             ValidateVersion(state.Version);
-            if (state.Items == null || state.Settings == null) throw new InvalidDataException("待办列表或窗口设置缺失。");
+            if (state.Items == null || state.Settings == null || state.RecurringRules == null) throw new InvalidDataException("待办列表、重复规则或窗口设置缺失。");
+            if (state.RecurringRules.Count > RecurringTasks.MaximumRuleCount) throw new InvalidDataException("重复规则数量过多。");
+            HashSet<string> ruleIds = new HashSet<string>(StringComparer.Ordinal);
+            Dictionary<string, RecurringTaskRule> ruleLookup = new Dictionary<string, RecurringTaskRule>(StringComparer.Ordinal);
+            foreach (RecurringTaskRule rule in state.RecurringRules) {
+                RecurringTasks.Validate(rule);
+                if (!ruleIds.Add(rule.Id)) throw new InvalidDataException("重复规则标识重复。");
+                ruleLookup.Add(rule.Id, rule);
+            }
+            if (state.Version < 3 && state.RecurringRules.Count != 0) throw new InvalidDataException("旧格式不能保存重复规则。");
+            HashSet<string> occurrenceKeys = new HashSet<string>(StringComparer.Ordinal);
             HashSet<string> ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (TodoItem item in state.Items)
             {
@@ -284,6 +340,19 @@ namespace CornerTodo
                     throw new InvalidDataException("待办项缺少创建时间或截止日期。");
                 if (!item.HasDeadline && (state.Version == 1 || item.DueDate != DateTime.MinValue || item.HasTime || item.DeadlineSetAt.HasValue))
                     throw new InvalidDataException("无截止日期的事项不能保存日期、具体时刻或计时起点。");
+                if (String.IsNullOrEmpty(item.RecurringRuleId)) {
+                    if (item.OccurrenceDate.HasValue || !String.IsNullOrEmpty(item.RepeatLabel)) throw new InvalidDataException("普通事项不能保存孤立的重复标识。");
+                }
+                else {
+                    if (state.Version < 3 || !ruleIds.Contains(item.RecurringRuleId) || !item.OccurrenceDate.HasValue ||
+                        item.OccurrenceDate.Value.Kind == DateTimeKind.Utc || item.OccurrenceDate.Value.TimeOfDay != TimeSpan.Zero ||
+                        String.IsNullOrWhiteSpace(item.RepeatLabel)) throw new InvalidDataException("重复事项缺少有效规则、周期日期或历史说明。");
+                    RecurringTaskRule owner = ruleLookup[item.RecurringRuleId];
+                    if (!owner.ProcessedThrough.HasValue || item.OccurrenceDate.Value > owner.ProcessedThrough.Value)
+                        throw new InvalidDataException("重复事项的周期超出已保存的处理进度。");
+                    string occurrenceKey = item.RecurringRuleId + "|" + item.OccurrenceDate.Value.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+                    if (!occurrenceKeys.Add(occurrenceKey)) throw new InvalidDataException("同一规则的同一期事项重复。");
+                }
             }
             WidgetSettings settings = state.Settings;
             if (!Enum.IsDefined(typeof(TaskSortMode), settings.SortMode)) throw new InvalidDataException("排序方式无效。");
@@ -297,7 +366,7 @@ namespace CornerTodo
         {
             // An unsupported schema is not corruption. In particular, never restore
             // an older backup over a valid future-version main file.
-            if (version != 1 && version != TodoState.CurrentVersion)
+            if (version < 1 || version > TodoState.CurrentVersion)
                 throw new NotSupportedException("无法读取此版本的待办数据：" + version + "。请使用支持该数据版本的程序；原数据未被改写。");
         }
 
@@ -316,6 +385,27 @@ namespace CornerTodo
             object value;
             if (!source.TryGetValue(key, out value) || !(value is string)) throw new InvalidDataException("缺少文本字段：" + key);
             return (string)value;
+        }
+
+        private static string OptionalText(IDictionary<string, object> source, string key)
+        {
+            object value;
+            if (!source.TryGetValue(key, out value) || value == null) return null;
+            if (!(value is string)) throw new InvalidDataException("无效文本字段：" + key);
+            return (string)value;
+        }
+
+        private static long LongInteger(IDictionary<string, object> source, string key, long fallback)
+        {
+            object value;
+            if (!source.TryGetValue(key, out value)) return fallback;
+            if (!(value is int) && !(value is long)) throw new InvalidDataException("无效整数字段：" + key);
+            return Convert.ToInt64(value, CultureInfo.InvariantCulture);
+        }
+
+        private static int Integer(IDictionary<string, object> source, string key, int fallback)
+        {
+            return checked((int)LongInteger(source, key, fallback));
         }
 
         private static string OptionalNotes(IDictionary<string, object> source)
