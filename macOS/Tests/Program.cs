@@ -41,15 +41,17 @@ namespace CornerTodo.MacTests
 
                 Check(StoreTests.Main(), "shared storage");
                 Check(SessionTests.Main(), "shared task session");
+                Check(RecurrenceTests.Main(), "shared recurring tasks");
                 Check(GrowthLayoutTests.Main(), "shared growth layout");
                 SerializerContract();
                 Paths(owned);
                 WindowsGoldenFixture(owned);
                 WindowsNoDeadlineFixture(owned);
+                WindowsRecurringFixture(owned);
                 LegacyDatesAndLiteralNotes(owned);
                 int singleInstanceAssertions = SingleInstanceTests.Run(owned);
                 File.WriteAllText(Path.Combine(owned, "verification.json"), JsonSerializer.Serialize(new {
-                    sharedSuites = new[] { "Store", "Session", "Growth" }, sharedSuitesPassed = true,
+                    sharedSuites = new[] { "Store", "Session", "Recurrence", "Growth" }, sharedSuitesPassed = true,
                     adapterAndCompatibilityAssertions = assertions, testDataRoot = owned,
                     singleInstanceAssertions = singleInstanceAssertions,
                     productionDataRead = false, nativeMacExecutionVerified = false,
@@ -138,7 +140,7 @@ namespace CornerTodo.MacTests
             string file = Path.Combine(directory, "todos.json"); File.WriteAllText(file, fixture, new UTF8Encoding(false));
             var store = new TodoStore(directory);
             TodoState state = store.Load();
-            Assert(store.LoadWarning == null && state.Items.Count == 2 && state.Version == 2,
+            Assert(store.LoadWarning == null && state.Items.Count == 2 && state.Version == TodoState.CurrentVersion,
                 "The Windows version-one fixture did not migrate in memory without losing its tasks.");
             Assert(File.ReadAllText(file, Encoding.UTF8) == fixture, "Reading a valid Windows file rewrote its original bytes.");
             TodoItem pending = state.Items.Single(item => item.Id == "synthetic-windows-task");
@@ -165,9 +167,9 @@ namespace CornerTodo.MacTests
             using (JsonDocument json = JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8)))
             {
                 JsonElement item = json.RootElement.GetProperty("Items")[0];
-                Assert(json.RootElement.GetProperty("Version").GetInt32() == 2 && item.GetProperty("HasDeadline").GetBoolean() &&
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == TodoState.CurrentVersion && item.GetProperty("HasDeadline").GetBoolean() &&
                     item.GetProperty("DueDate").GetString() == "2026-10-31T17:23:45.0004321" && item.GetProperty("Priority").GetInt32() == 1,
-                    "Saving an older Windows fixture lost its date precision or version-two deadline flag.");
+                    "Saving an older Windows fixture lost its date precision or current-schema deadline flag.");
             }
         }
 
@@ -178,7 +180,7 @@ namespace CornerTodo.MacTests
             const string fixture = "{\"Version\":2,\"Items\":[{\"Id\":\"synthetic-no-deadline\",\"Text\":\"随手记下的事项\",\"Notes\":\"稍后整理\",\"Priority\":1,\"CreatedAt\":\"2026-10-01T08:00:00.0000000\",\"HasDeadline\":false,\"DueDate\":null,\"HasTime\":false,\"DeadlineSetAt\":null}]}";
             File.WriteAllText(file, fixture, new UTF8Encoding(false));
             var store = new TodoStore(directory); TodoState state = store.Load();
-            Assert(store.LoadWarning == null && state.Version == 2 && state.Items.Count == 1,
+            Assert(store.LoadWarning == null && state.Version == TodoState.CurrentVersion && state.Items.Count == 1,
                 "The version-two Windows fixture was treated as corrupt: " + store.LoadWarning);
             Assert(File.ReadAllText(file, Encoding.UTF8) == fixture, "Reading a no-deadline fixture rewrote its original bytes.");
             TodoItem item = state.Items.Single();
@@ -198,7 +200,7 @@ namespace CornerTodo.MacTests
             Assert(reloaded.Items.Single().IsCompleted && !reloaded.Items.Single().HasDeadline,
                 "Completing and restarting changed the no-deadline state.");
             using (JsonDocument json = JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8)))
-                Assert(json.RootElement.GetProperty("Version").GetInt32() == 2 &&
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == TodoState.CurrentVersion &&
                     json.RootElement.GetProperty("Items")[0].GetProperty("DueDate").ValueKind == JsonValueKind.Null &&
                     !json.RootElement.GetProperty("Items")[0].GetProperty("HasDeadline").GetBoolean(),
                     "Mac storage did not preserve the shared nullable-date wire format.");
@@ -208,6 +210,86 @@ namespace CornerTodo.MacTests
             var scheduled = new TodoStore(directory).Load().Items.Single();
             Assert(scheduled.HasDeadline && scheduled.DueDate == now.AddDays(2) && scheduled.DeadlineSetAt == now,
                 "Adding a date reused the original creation time as its progress origin.");
+        }
+
+        private static void WindowsRecurringFixture(string output)
+        {
+            string directory = Path.Combine(output, "windows-recurring"); Directory.CreateDirectory(directory);
+            DateTime start = new DateTime(2026, 11, 2);
+            long timeTicks = new TimeSpan(17, 23, 45).Ticks + 1234;
+            var rule = new RecurringTaskRule {
+                Id = "synthetic-recurring-rule", Text = "整理研究记录", Notes = "仅本次修改不应改变模板\n/Date(0)/",
+                Priority = TaskPriority.High, HasDeadline = true, HasTime = true,
+                DeadlineOffsetDays = 2, DeadlineTimeTicks = timeTicks,
+                Recurrence = new RecurrenceOptions { Frequency = RecurrenceFrequency.Weekly,
+                    WeekDays = 2 | 32, DayOfMonth = 1, UseLastDay = false, StartDate = start },
+                IsPaused = true, IsStopped = false, ProcessedThrough = start
+            };
+            var item = new TodoItem {
+                Id = "synthetic-recurring-occurrence", Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority,
+                CreatedAt = start.AddHours(8), HasDeadline = true, HasTime = true,
+                DueDate = start.AddDays(2).AddTicks(timeTicks), DeadlineSetAt = start.AddHours(8),
+                RecurringRuleId = rule.Id, OccurrenceDate = start, RepeatLabel = "每周一、周五"
+            };
+            var state = new TodoState(); state.RecurringRules.Add(rule); state.Items.Add(item);
+            var store = new TodoStore(directory); store.Save(state);
+            string file = store.DataFilePath;
+            string original = File.ReadAllText(file, Encoding.UTF8);
+            var reloaded = new TodoStore(directory).Load();
+            Assert(File.ReadAllText(file, Encoding.UTF8) == original && reloaded.Version == TodoState.CurrentVersion,
+                "Reading current-schema recurrence data rewrote the file or changed its version.");
+            Assert(reloaded.RecurringRules.Count == 1 && reloaded.Items.Count == 1,
+                "Mac storage lost a recurring rule or one of its occurrence records.");
+            RecurringTaskRule loadedRule = reloaded.RecurringRules.Single();
+            TodoItem loadedItem = reloaded.Items.Single();
+            Assert(loadedRule.Id == rule.Id && loadedRule.Text == rule.Text && loadedRule.Notes == rule.Notes &&
+                loadedRule.Priority == rule.Priority && loadedRule.IsPaused && !loadedRule.IsStopped,
+                "Rule text, Unicode notes, priority or paused state did not survive the Mac serializer.");
+            Assert(loadedRule.Recurrence.Frequency == RecurrenceFrequency.Weekly && loadedRule.Recurrence.WeekDays == (2 | 32) &&
+                loadedRule.Recurrence.StartDate == start && loadedRule.ProcessedThrough == start &&
+                loadedRule.DeadlineOffsetDays == 2 && loadedRule.DeadlineTimeTicks == timeTicks,
+                "Recurrence calendar fields, processing cursor or wide time ticks were rounded or dropped.");
+            Assert(loadedItem.RecurringRuleId == rule.Id && loadedItem.OccurrenceDate == start &&
+                loadedItem.RepeatLabel == "每周一、周五" && loadedItem.DueDate.Ticks == item.DueDate.Ticks,
+                "Occurrence identity, frozen label or deadline precision did not survive round-trip.");
+            using (JsonDocument json = JsonDocument.Parse(original)) {
+                JsonElement savedRule = json.RootElement.GetProperty("RecurringRules")[0];
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == TodoState.CurrentVersion &&
+                    savedRule.GetProperty("DeadlineTimeTicks").GetInt64() == timeTicks &&
+                    json.RootElement.GetProperty("Items")[0].GetProperty("RecurringRuleId").GetString() == rule.Id,
+                    "The shared recurrence wire format omitted rule identity or changed 64-bit scheduling fields.");
+            }
+
+            string frozenRule = JsonSerializer.Serialize(loadedRule);
+            var session = new TodoSession(store, reloaded, false, () => start.AddHours(12));
+            session.Edit(loadedItem.Id, new TaskDraft { Text = "仅修改这一次的记录", Notes = "本次备注",
+                Priority = TaskPriority.Low, HasDeadline = false });
+            session.SetCompleted(loadedItem.Id, true);
+            session.SaveGeometry(12, 24, 430, 475);
+            var edited = new TodoStore(directory).Load();
+            Assert(JsonSerializer.Serialize(edited.RecurringRules.Single()) == frozenRule,
+                "Ordinary Mac task edits, completion or geometry save changed the future recurrence rule.");
+            TodoItem editedItem = edited.Items.Single();
+            Assert(editedItem.Text == "仅修改这一次的记录" && editedItem.IsCompleted && !editedItem.HasDeadline &&
+                editedItem.RecurringRuleId == rule.Id && editedItem.OccurrenceDate == start && editedItem.RepeatLabel == item.RepeatLabel,
+                "Editing only an occurrence detached it, erased its history identity or changed its frozen repeat label.");
+            TodoState detached = session.Snapshot();
+            detached.RecurringRules[0].Text = "不可泄漏的副本修改";
+            detached.RecurringRules[0].Recurrence.WeekDays = 4;
+            Assert(session.Snapshot().RecurringRules.Single().Text == rule.Text &&
+                session.Snapshot().RecurringRules.Single().Recurrence.WeekDays == (2 | 32),
+                "A Mac UI snapshot could mutate its session-owned recurrence template.");
+
+            string supported = File.ReadAllText(file, Encoding.UTF8);
+            string future = supported.Replace("\"Version\":" + TodoState.CurrentVersion, "\"Version\":999");
+            Assert(future != supported, "Future-version fixture did not update the root schema marker.");
+            string backup = File.ReadAllText(file + ".bak", Encoding.UTF8);
+            File.WriteAllText(file, future, new UTF8Encoding(false));
+            Throws<NotSupportedException>(() => new TodoStore(directory).Load(),
+                "An unknown recurrence schema was treated as damaged data or replaced with an older backup.");
+            Assert(File.ReadAllText(file, Encoding.UTF8) == future && File.ReadAllText(file + ".bak", Encoding.UTF8) == backup &&
+                !Directory.GetFiles(directory, "*.corrupt-*").Any(),
+                "Rejecting a future schema changed the original file, its backup or its classification.");
         }
 
         private static void LegacyDatesAndLiteralNotes(string output)

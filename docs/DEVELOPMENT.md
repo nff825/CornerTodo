@@ -1,6 +1,6 @@
 # 开发工程说明
 
-当前 Windows 源码版本为 **1.5.0**。新增可选截止日期和主面板简约滚动条；保留时刻点选、贴边收起、备注、时间进度与优先级排序。生产源码继续按职责归入 `src`，工程、配置与构建入口保留在根目录，任务规则与界面交互分别维护。
+当前 Windows 源码版本为 **1.6.0**。新增默认关闭的每日/每周/每月重复任务、按期生成、独立历史和规则管理；保留时刻点选、贴边收起、备注、时间进度与优先级排序。生产源码继续按职责归入 `src`，工程、配置与构建入口保留在根目录，任务规则与界面交互分别维护。
 
 ## 工程与共享清单
 
@@ -123,6 +123,17 @@ README 新增的三张展示图为实际 WPF 控件渲染，分别是 `docs/imag
 - Mac 工程直接链接这些共享规则，因此 Mac 开发界面和测试同时更新。Windows公开源码清单显式纳入 Mac 工程/文档/许可，避免网页更新后共享模型和两端编辑器不同步；Windows便携包仍无Mac二进制或额外运行依赖。
 - 原 Mac 0.1.0-alpha.1 附件与旧Windows不能读v2。当前仅验证Mac开发分支构建和Windows辅助界面，不发布新Mac版本，不代表Mac真机通过。
 
+## v1.6.0 重复规则、发生期与版本3
+
+- `RecurringTasks.cs` 定义 RecurrenceOptions、RecurringTaskRule、RecurrenceSummary 与纯本地日历运算。每日按天、每周用星期位图、每月用固定日或月末，短月取最后一天，计数不逐天扫描长区间。
+- `TaskDraft.Recurrence=null` 表示普通事项，默认不重复。只有启用才构造计划；TaskEditor把开关与具体配置分开，折叠不触发保存。编辑重复项本次不修改模板；修改后续由专用入口处理。
+- TodoState保存RecurringRules；每条发生期保存RecurringRuleId、OccurrenceDate和RepeatLabel快照。规则游标与发生期同一候选状态原子保存，成功才提交；删除本次不倒退游标，重启/时钟回退不重复生成。
+- 首期有截止日期时存相对开始日期的DeadlineOffsetDays和DeadlineTimeTicks，后续按期次日期复用；无截止规则不保存伪日期、间隔或时刻。
+- `GetRecurrenceSummary`只读；`GenerateCurrentRecurrences`仅自动生成无历史遗漏规则的当期。`ResolveMissedRecurrences(bool)`是用户确认的补建或跳过，每批至多366项；剩余仍可查询。暂停/修改后续前拦截未处理历史，恢复跳过暂停期，停止保留已生成历史与模板引用。
+- MainWindow复用刷新周期和编辑/菜单保护，忙时不生成或弹对话框，退出后停止；漏期只做一次汇总提示，并保留菜单重试入口。规则管理与漏期对话框位于RecurringTasksWindow.cs。
+- CurrentVersion=3，读取旧1/2后内存迁移，不构造时写盘；未来版本保留原文件并报错。规则/游标/发生期均参与校验和深拷贝。
+- 新增独立Recurrence测试入口，重复UI测试并入View组；全部登记功能组为12组。Mac工程链接同一模型并验证v3保留，但没有接入周期生成和管理UI；旧Macalpha1包仍不可读取新格式。
+
 ## 路径一：Windows PowerShell 脚本
 
 在项目根目录使用 **Windows PowerShell** 运行：
@@ -207,7 +218,7 @@ msbuild .\CornerTodo.csproj /t:DescribeBuild
 
 ## 测试与调试数据
 
-共享清单目前登记十一组功能测试；v1.5.0 继续使用这些入口，在原套件中扩展无日期保存/迁移、排序/紧迫度、编辑器开关与滚动条检查：
+共享清单目前登记十二组功能测试；v1.6.0新增Recurrence入口，View组包含重复编辑/管理的真实控件检查：
 
 ```powershell
 powershell -NoProfile -File .\tests\Run-StoreTests.ps1
@@ -252,12 +263,12 @@ IDE 中也可为调试会话设置 `--preview --windowed` 参数。若需要创�
 `Package.ps1` 仍负责从公开文件清单建立干净副本，在副本中构建、测试并生成本地便携包和源码包。源码包保留 `src/App`、`src/Tasks`、`src/UI`、`src/Windows` 的目录结构，工程文件、共享清单、共享脚本与开发说明一并保留；个人待办、日志、调试输出和本机自启动登记继续排除。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.5.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.6.0
 ```
 
-`Package.ps1` 验证 `VERSION` 后，默认将本版产物生成到 `release\v1.5.0`；显式 `-OutputDirectory` 仍可覆盖为其他项目内目录。同一输出位置再次打包时，上一批源码目录、ZIP、摘要和报告会保存在 `archive/packages/v版本号/previous-bundles-*`，供本地回退使用；待办备份应通过原 `Data` 单独保留。
+`Package.ps1` 验证 `VERSION` 后，默认将本版产物生成到 `release\v1.6.0`；显式 `-OutputDirectory` 仍可覆盖为其他项目内目录。同一输出位置再次打包时，上一批源码目录、ZIP、摘要和报告会保存在 `archive/packages/v版本号/previous-bundles-*`，供本地回退使用；待办备份应通过原 `Data` 单独保留。
 
-这不是开发日常构建的必要步骤，也不会替用户创建仓库、上传附件或发布 GitHub Release。上传本次完整干净源码并核对测试结果后，再创建指向本次提交的 `v1.5.0` 标签，保留已有 `v1.4.0` 及更早版本的 Release 和标签。从 v1.4.0 仓库升级沿用原目录，不需要清理旧根目录源码。
+这不是开发日常构建的必要步骤，也不会替用户创建仓库、上传附件或发布 GitHub Release。上传本次完整干净源码并核对测试结果后，再创建指向本次提交的 `v1.6.0` 标签，保留已有 `v1.5.0` 及更早版本的 Release 和标签。从 v1.5.0 仓库升级沿用原目录，不需要清理旧根目录源码。
 
 发布前运行全部测试，并以本次 `PACKAGE-REPORT.txt`、测试日志和文件摘要为核对依据；没有完成的检查不得写成已通过。打包成功不等于已经完成原生桌面实机试用，也不代表已经发布到 GitHub。
 
