@@ -58,6 +58,12 @@ internal static class StoreTests
             Run("Priority sorting is optional, deterministic and does not affect completion history", PriorityOrdering);
             Run("Time progress follows each full 3-, 5- and 30-day interval linearly", FullIntervalProgress);
             Run("Time progress handles date-only, UTC, overdue and invalid scheduling bounds", TimeProgressBoundaries);
+            Run("Optional deadlines survive mixed-task restart without fake dates", OptionalDeadlineRoundTrip);
+            Run("Version-one documents migrate in memory only and save explicitly as version two", OptionalDeadlineMigration);
+            Run("Unscheduled tasks never contribute urgency, time progress or attention statistics", OptionalDeadlineAttention);
+            Run("Both sort modes distinguish undated tasks and preserve stable creation ordering", OptionalDeadlineOrdering);
+            Run("Contradictory optional deadline data is preserved and rejected before replacing saved data", OptionalDeadlineValidation);
+            Run("Future schema documents fail without archiving or restoring an older backup", FutureSchemaProtection);
             Console.WriteLine("PASS: " + passed + " tests");
             return 0;
         }
@@ -105,7 +111,7 @@ internal static class StoreTests
     {
         TodoStore store = Store("first-run");
         TodoState state = store.Load();
-        Assert(state.Version == 1 && state.Items.Count == 0, "Default state is invalid.");
+        Assert(state.Version == TodoState.CurrentVersion && state.Items.Count == 0, "Default state is invalid.");
         Assert(state.Settings.Width == 430 && state.Settings.Height == 475 && !state.Settings.Collapsed, "Default geometry is invalid.");
         Assert(state.Settings.Left == null && state.Settings.Top == null, "First-run position should be unset.");
         Assert(!state.Settings.EdgeAutoHide, "Edge auto-hide must be opt-in on first launch.");
@@ -228,7 +234,7 @@ internal static class StoreTests
         Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
         File.WriteAllText(store.DataFilePath, "{\"Items\":[],\"Settings\":{\"Left\":-400,\"Top\":20}}", Encoding.UTF8);
         TodoState state = store.Load();
-        Assert(state.Version == 1 && state.Settings.Width == 430 && state.Settings.Height == 475 && !state.Settings.Collapsed, "Missing optional fields did not use defaults.");
+        Assert(state.Version == TodoState.CurrentVersion && state.Settings.Width == 430 && state.Settings.Height == 475 && !state.Settings.Collapsed, "Missing optional fields did not use defaults.");
         Assert(state.Settings.Left == -400 && state.Settings.Top == 20 && store.LoadWarning == null, "Existing optional settings were not preserved.");
         Assert(!state.Settings.EdgeAutoHide, "An older settings document silently enabled edge auto-hide.");
     }
@@ -479,7 +485,7 @@ internal static class StoreTests
         File.WriteAllText(store.DataFilePath, original, Encoding.UTF8);
         TodoState state = store.Load();
         DateTime now = new DateTime(2026, 10, 20, 13, 0, 0);
-        Assert(store.LoadWarning == null && state.Version == 1 && state.Items.Count == 1, "Original schema-version-one data was mistaken for corruption.");
+        Assert(store.LoadWarning == null && state.Version == TodoState.CurrentVersion && state.Items.Count == 1, "Original schema-version-one data was mistaken for corruption.");
         Assert(state.Items[0].DeadlineSetAt == null && state.Settings.AutoExpand, "New optional fields did not use compatible defaults.");
         AssertNear(TodoRules.Urgency(state.Items[0], now), 0.25, "Missing scheduling timestamp did not fall back to CreatedAt.");
         store.Save(state);
@@ -589,7 +595,7 @@ internal static class StoreTests
 
     private static void AssertAppearanceTask(TodoState state)
     {
-        Assert(state.Version == 1 && state.Items.Count == 1, "Appearance migration changed schema version or task count.");
+        Assert(state.Version == TodoState.CurrentVersion && state.Items.Count == 1, "Appearance migration lost tasks or did not upgrade the in-memory schema.");
         TodoItem item = state.Items.Single();
         Assert(item.Id == "appearance-stable" && item.Text == "颜色不能影响任务 📌" && item.IsCompleted && item.HasTime, "Appearance changed task identity, Unicode text or status.");
         Assert(item.CreatedAt == new DateTime(2026, 10, 20, 9, 0, 0, DateTimeKind.Utc).AddTicks(1234)
@@ -906,6 +912,156 @@ internal static class StoreTests
         item.IsCompleted = true;
         AssertNear(TodoRules.TimeProgress(item, start.AddYears(1)), 0, "A completed task still produced an active time bar value.");
         AssertNear(TodoRules.TimeProgress(null, start), 0, "Missing task did not safely return zero.");
+    }
+
+    private static TodoItem Undated(string id, DateTime created, TaskPriority priority)
+    {
+        return new TodoItem { Id = id, Text = "没有截止的 " + id, HasDeadline = false,
+            CreatedAt = created, DueDate = DateTime.MinValue, Priority = priority };
+    }
+
+    private static void OptionalDeadlineRoundTrip()
+    {
+        TodoStore store = Store("optional-deadline-roundtrip");
+        TodoState state = State("保留已有截止");
+        TodoItem dated = state.Items[0]; dated.DueDate = DateTime.SpecifyKind(dated.DueDate, DateTimeKind.Utc).AddTicks(4321);
+        TodoItem undated = Undated("undated-one", dated.CreatedAt.ToUniversalTime().AddTicks(1234), TaskPriority.High);
+        undated.Notes = "随手记，之后再安排\n保留备注";
+        state.Items.Add(undated); state.Settings.SortMode = TaskSortMode.Priority;
+        store.Save(state);
+        string json = File.ReadAllText(store.DataFilePath);
+        Assert(json.Contains("\"Version\":2") && json.Contains("\"HasDeadline\":false") && json.Contains("\"DueDate\":null"),
+            "Unscheduled data did not explicitly serialize a missing deadline in schema two.");
+        Assert(!json.Contains("0001-") && !json.Contains("9999-"), "Unscheduled data stored a fake calendar date.");
+        TodoStore restarted = new TodoStore(Path.GetDirectoryName(store.DataFilePath));
+        TodoState loaded = restarted.Load(); TodoItem actual = loaded.Items.Single(i => i.Id == undated.Id);
+        Assert(loaded.Version == 2 && loaded.Items.Count == 2 && restarted.LoadWarning == null, "Mixed deadlines failed to reload cleanly.");
+        Assert(!actual.HasDeadline && actual.DueDate == DateTime.MinValue && !actual.HasTime && !actual.DeadlineSetAt.HasValue,
+            "Unscheduled state gained scheduling information on restart.");
+        Assert(actual.Text == undated.Text && actual.Notes == undated.Notes && actual.Priority == undated.Priority &&
+            actual.CreatedAt.Ticks == undated.CreatedAt.Ticks && actual.CreatedAt.Kind == undated.CreatedAt.Kind,
+            "Unscheduled fields, priority or creation history changed.");
+        TodoItem actualDated = loaded.Items.Single(i => i.Id == dated.Id);
+        Assert(actualDated.HasDeadline && actualDated.DueDate.Ticks == dated.DueDate.Ticks && actualDated.DueDate.Kind == dated.DueDate.Kind,
+            "Adding an undated task changed an existing dated task.");
+        actual.IsCompleted = true; actual.CompletedAt = dated.CreatedAt.AddDays(5); store.Save(loaded);
+        TodoItem completed = store.Load().Items.Single(i => i.Id == undated.Id);
+        Assert(completed.IsCompleted && completed.CompletedAt == actual.CompletedAt && !completed.HasDeadline,
+            "Completed undated history lost its completion timestamp or acquired a deadline.");
+    }
+
+    private static void OptionalDeadlineMigration()
+    {
+        Assert(new TodoItem().HasDeadline, "Existing TodoItem initializers no longer default to a deadline.");
+        string itemJson = "\"Items\":[{\"Id\":\"legacy\",\"Text\":\"原有截止不能丢\",\"CreatedAt\":\"2026-10-20T09:00:00.0000000Z\",\"DueDate\":\"2026-11-02T17:23:45.1234567Z\",\"HasTime\":true,\"DeadlineSetAt\":\"2026-10-21T08:00:00.0000000Z\"}]";
+        foreach (bool explicitVersion in new[] { false, true })
+        {
+            TodoStore store = Store("deadline-migration-" + explicitVersion); Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            File.WriteAllText(store.DataFilePath, "{" + (explicitVersion ? "\"Version\":1," : "") + itemJson + "}", Encoding.UTF8);
+            byte[] before = File.ReadAllBytes(store.DataFilePath); TodoState loaded = store.Load();
+            TodoItem item = loaded.Items.Single();
+            Assert(loaded.Version == 2 && item.HasDeadline && item.HasTime && item.DueDate.Kind == DateTimeKind.Utc &&
+                item.DueDate.Ticks == DateTime.Parse("2026-11-02T17:23:45.1234567Z", null, System.Globalization.DateTimeStyles.RoundtripKind).Ticks,
+                "Legacy date precision, Kind or presence changed during migration.");
+            Assert(store.LoadWarning == null && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)) && !File.Exists(store.DataFilePath + ".bak"),
+                "Loading legacy data wrote files or treated it as corruption.");
+            store.Save(loaded);
+            Assert(File.ReadAllText(store.DataFilePath).Contains("\"Version\":2") &&
+                before.SequenceEqual(File.ReadAllBytes(store.DataFilePath + ".bak")), "The first new save did not preserve the legacy generation.");
+        }
+    }
+
+    private static void OptionalDeadlineAttention()
+    {
+        DateTime now = new DateTime(2026, 10, 31, 12, 0, 0);
+        TodoItem item = Undated("not-scheduled", now.AddYears(-1), TaskPriority.High);
+        foreach (DateTime clock in new[] { DateTime.MinValue, now, DateTime.MaxValue })
+        {
+            Assert(!TodoRules.IsOverdue(item, clock) && !TodoRules.IsUrgent(item, clock), "An unscheduled task became overdue or urgent.");
+            AssertNear(TodoRules.TimeProgress(item, clock), 0, "Unscheduled task acquired a time bar.");
+            AssertNear(TodoRules.Urgency(item, clock), 0, "Unscheduled task expanded the panel.");
+            Assert(TodoRules.FormatDue(item, clock) == "未设截止" && TodoRules.FormatAttention(item, clock) == "未设截止",
+                "Unscheduled task displayed a fake date, countdown or overdue label.");
+        }
+        TodoState state = new TodoState(); state.Items.Add(item);
+        Assert(TodoRules.Pending(state).Count() == 1 && TodoRules.UrgentCount(state, now) == 0 && TodoRules.OverdueCount(state, now) == 0,
+            "Unscheduled task was omitted from pending count or included in attention totals.");
+        AssertNear(TodoRules.Expansion(state, now), 0, "An all-undated panel expanded.");
+        TodoItem urgent = Item("urgent-dated", now.AddHours(1), true); urgent.DeadlineSetAt = now.AddHours(-3);
+        double expected = TodoRules.Urgency(urgent, now); state.Items.Add(urgent);
+        AssertNear(TodoRules.Expansion(state, now), expected, "An undated task changed another task's contribution.");
+        item.IsCompleted = true;
+        Assert(TodoRules.Completed(state).Single().Id == item.Id && TodoRules.FormatAttention(item, now) == "未设截止",
+            "Completed undated task lost its label or history membership.");
+    }
+
+    private static void OptionalDeadlineOrdering()
+    {
+        DateTime created = new DateTime(2026, 10, 1);
+        TodoItem highUndated = Undated("high-undated", created.AddDays(3), TaskPriority.High);
+        TodoItem normalB = Undated("normal-b", created.AddDays(1), TaskPriority.Normal);
+        TodoItem normalA = Undated("normal-a", created.AddDays(1), TaskPriority.Normal);
+        TodoItem normalOld = Undated("normal-old", created, TaskPriority.Normal);
+        TodoItem lowDated = Item("low-dated", created.AddDays(1), false); lowDated.Priority = TaskPriority.Low;
+        TodoItem highDated = Item("high-dated", DateTime.MaxValue, true); highDated.Priority = TaskPriority.High;
+        TodoItem done = Undated("done", created, TaskPriority.High); done.IsCompleted = true; done.CompletedAt = created.AddDays(5);
+        TodoState state = new TodoState { Items = new List<TodoItem> { normalB, highUndated, done, highDated, normalOld, lowDated, normalA } };
+        string membership = String.Join(",", state.Items.Select(i => i.Id));
+        Assert(String.Join(",", TodoRules.Pending(state).Select(i => i.Id)) == "low-dated,high-dated,normal-old,normal-a,normal-b,high-undated",
+            "Deadline order did not put all dated tasks first and undated tasks in stable creation order.");
+        state.Settings.SortMode = TaskSortMode.Priority;
+        Assert(String.Join(",", TodoRules.Pending(state).Select(i => i.Id)) == "high-dated,high-undated,normal-old,normal-a,normal-b,low-dated",
+            "Priority mode did not prioritize ranks and then put dated tasks before undated in each rank.");
+        Assert(String.Join(",", state.Items.Select(i => i.Id)) == membership && TodoRules.Completed(state).Single().Id == done.Id,
+            "Optional deadline sorting mutated data or completion history.");
+    }
+
+    private static void OptionalDeadlineValidation()
+    {
+        TodoStore store = Store("optional-deadline-invalid"); TodoState saved = State("保持原始数据"); store.Save(saved);
+        byte[] before = File.ReadAllBytes(store.DataFilePath);
+        foreach (int contradiction in new[] { 0, 1, 2 })
+        {
+            TodoState next = State("不应替换"); TodoItem item = next.Items[0]; item.HasDeadline = false; item.DueDate = DateTime.MinValue;
+            if (contradiction == 0) item.DueDate = DateTime.Today;
+            if (contradiction == 1) item.HasTime = true;
+            if (contradiction == 2) item.DeadlineSetAt = DateTime.Today;
+            bool rejected = false; try { store.Save(next); } catch (InvalidDataException) { rejected = true; }
+            Assert(rejected && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Contradictory optional deadline replaced valid data.");
+        }
+        string[] badItems = {
+            "\"HasDeadline\":false,\"DueDate\":\"2026-11-02T00:00:00.0000000\"",
+            "\"HasDeadline\":false,\"DueDate\":null,\"HasTime\":true",
+            "\"HasDeadline\":false,\"DueDate\":null,\"DeadlineSetAt\":\"2026-11-01T00:00:00.0000000\"",
+            "\"HasDeadline\":\"false\",\"DueDate\":null",
+            "\"DueDate\":null"
+        };
+        for (int index = 0; index < badItems.Length; index++)
+        {
+            TodoStore malformed = Store("deadline-invalid-json-" + index); Directory.CreateDirectory(Path.GetDirectoryName(malformed.DataFilePath));
+            File.WriteAllText(malformed.DataFilePath, "{\"Version\":2,\"Items\":[{\"Id\":\"bad\",\"Text\":\"保留矛盾输入\",\"CreatedAt\":\"2026-10-20T00:00:00.0000000\"," + badItems[index] + "}]}", Encoding.UTF8);
+            byte[] broken = File.ReadAllBytes(malformed.DataFilePath); TodoState loaded = malformed.Load();
+            Assert(loaded.Items.Count == 0 && malformed.LoadWarning != null && broken.SequenceEqual(File.ReadAllBytes(malformed.DataFilePath)),
+                "Invalid deadline data was silently accepted, deleted or overwritten.");
+            Assert(Directory.GetFiles(Path.GetDirectoryName(malformed.DataFilePath), "*.corrupt-*").Any(p => broken.SequenceEqual(File.ReadAllBytes(p))),
+                "Contradictory deadline data was not preserved for recovery.");
+        }
+    }
+
+    private static void FutureSchemaProtection()
+    {
+        TodoStore store = Store("future-schema-protection"); store.Save(State("旧备份")); store.Save(State("当前文件"));
+        string future = File.ReadAllText(store.DataFilePath).Replace("\"Version\":2", "\"Version\":99");
+        File.WriteAllText(store.DataFilePath, future, Encoding.UTF8);
+        byte[] main = File.ReadAllBytes(store.DataFilePath), backup = File.ReadAllBytes(store.DataFilePath + ".bak");
+        bool rejected = false; try { store.Load(); } catch (NotSupportedException error) { rejected = error.Message.Contains("99"); }
+        Assert(rejected && main.SequenceEqual(File.ReadAllBytes(store.DataFilePath)) && backup.SequenceEqual(File.ReadAllBytes(store.DataFilePath + ".bak")),
+            "An unsupported schema was replaced by an older backup or modified.");
+        Assert(store.LoadWarning == null && Directory.GetFiles(Path.GetDirectoryName(store.DataFilePath), "*.corrupt-*").Length == 0,
+            "A future schema was mislabeled as corrupt.");
+        TodoState unsupported = State("不支持的写入"); unsupported.Version = 99;
+        rejected = false; try { store.Save(unsupported); } catch (NotSupportedException) { rejected = true; }
+        Assert(rejected && main.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Saving an unsupported schema changed the current document.");
     }
 
     private static void AssertNear(double actual, double expected, string message)

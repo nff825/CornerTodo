@@ -10,7 +10,7 @@ namespace CornerTodo
 
     public sealed class TodoItem
     {
-        public TodoItem() { Notes = ""; Priority = TaskPriority.Normal; }
+        public TodoItem() { Notes = ""; Priority = TaskPriority.Normal; HasDeadline = true; }
 
         public string Id { get; set; }
         public string Text { get; set; }
@@ -20,6 +20,7 @@ namespace CornerTodo
         public DateTime CreatedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
         public DateTime DueDate { get; set; }
+        public bool HasDeadline { get; set; }
         public bool HasTime { get; set; }
         public DateTime? DeadlineSetAt { get; set; }
     }
@@ -50,9 +51,11 @@ namespace CornerTodo
 
     public sealed class TodoState
     {
+        public const int CurrentVersion = 2;
+
         public TodoState()
         {
-            Version = 1;
+            Version = CurrentVersion;
             Items = new List<TodoItem>();
             Settings = new WidgetSettings();
         }
@@ -74,7 +77,7 @@ namespace CornerTodo
         /// <summary>Elapsed scheduling time, independent of the final-24-hour attention curve.</summary>
         public static double TimeProgress(TodoItem item, DateTime now)
         {
-            if (item == null || item.IsCompleted) return 0;
+            if (item == null || item.IsCompleted || !item.HasDeadline) return 0;
             DateTime deadline = Deadline(item);
             DateTime current = LocalTime(now);
             if (current >= deadline) return 1;
@@ -86,6 +89,8 @@ namespace CornerTodo
         public static DateTime Deadline(TodoItem item)
         {
             if (item == null) throw new ArgumentNullException("item");
+            // An internal ordering value only; an unscheduled task never stores a fake date.
+            if (!item.HasDeadline) return DateTime.MaxValue;
             DateTime due = LocalTime(item.DueDate);
             if (item.HasTime) return due;
             // A date without a time stays valid throughout that calendar day.
@@ -94,19 +99,19 @@ namespace CornerTodo
 
         public static bool IsOverdue(TodoItem item, DateTime now)
         {
-            return item != null && !item.IsCompleted && LocalTime(now) >= Deadline(item);
+            return item != null && item.HasDeadline && !item.IsCompleted && LocalTime(now) >= Deadline(item);
         }
 
         public static bool IsUrgent(TodoItem item, DateTime now)
         {
-            if (item == null || item.IsCompleted) return false;
+            if (item == null || item.IsCompleted || !item.HasDeadline) return false;
             TimeSpan remaining = Deadline(item) - LocalTime(now);
             return remaining > TimeSpan.Zero && remaining <= TimeSpan.FromHours(6);
         }
 
         public static double Urgency(TodoItem item, DateTime now)
         {
-            if (item == null || item.IsCompleted) return 0;
+            if (item == null || item.IsCompleted || !item.HasDeadline) return 0;
             DateTime deadline = Deadline(item);
             double remaining = (deadline - LocalTime(now)).TotalSeconds;
             if (remaining <= 0) return 1;
@@ -145,6 +150,7 @@ namespace CornerTodo
         public static string FormatDue(TodoItem item, DateTime now)
         {
             if (item == null) throw new ArgumentNullException("item");
+            if (!item.HasDeadline) return "未设截止";
             DateTime due = LocalTime(item.DueDate);
             DateTime today = LocalTime(now).Date;
             double days = (due.Date - today).TotalDays;
@@ -159,7 +165,7 @@ namespace CornerTodo
         public static string FormatAttention(TodoItem item, DateTime now)
         {
             string due = FormatDue(item, now);
-            if (item.IsCompleted) return due;
+            if (item.IsCompleted || !item.HasDeadline) return due;
             DateTime localNow = LocalTime(now);
             DateTime deadline = Deadline(item);
             if (IsOverdue(item, localNow))
@@ -174,8 +180,9 @@ namespace CornerTodo
             IEnumerable<TodoItem> pending = Items(state).Where(item => !item.IsCompleted);
             IOrderedEnumerable<TodoItem> ordered = state != null && state.Settings != null && state.Settings.SortMode == TaskSortMode.Priority
                 ? pending.OrderBy(item => Enum.IsDefined(typeof(TaskPriority), item.Priority) ? (int)item.Priority : (int)TaskPriority.Normal)
+                    .ThenBy(item => item.HasDeadline ? 0 : 1)
                     .ThenBy(item => Deadline(item))
-                : pending.OrderBy(item => Deadline(item));
+                : pending.OrderBy(item => item.HasDeadline ? 0 : 1).ThenBy(item => Deadline(item));
             return ordered
                 .ThenBy(item => item.CreatedAt)
                 .ThenBy(item => item.Id, StringComparer.Ordinal);

@@ -122,6 +122,9 @@ namespace CornerTodo
                 IDictionary<string, object> root = AsObject(parsed, "数据根节点");
                 state = FromJson(root);
                 Validate(state);
+                // Read legacy documents without touching their bytes. The first explicit
+                // save writes the new schema, including the optional deadline state.
+                state.Version = TodoState.CurrentVersion;
                 return true;
             }
             catch (ArgumentException exception) { error = exception.Message; }
@@ -153,7 +156,8 @@ namespace CornerTodo
                     { "Id", item.Id }, { "Text", item.Text }, { "Notes", item.Notes ?? "" }, { "Priority", (int)item.Priority }, { "IsCompleted", item.IsCompleted },
                     { "CreatedAt", DateText(item.CreatedAt) },
                     { "CompletedAt", item.CompletedAt.HasValue ? DateText(item.CompletedAt.Value) : null },
-                    { "DueDate", DateText(item.DueDate) }, { "HasTime", item.HasTime },
+                    { "HasDeadline", item.HasDeadline },
+                    { "DueDate", item.HasDeadline ? DateText(item.DueDate) : null }, { "HasTime", item.HasTime },
                     { "DeadlineSetAt", item.DeadlineSetAt.HasValue ? DateText(item.DeadlineSetAt.Value) : null }
                 });
             }
@@ -161,7 +165,7 @@ namespace CornerTodo
             AppearanceSettings appearance = AppearanceSettings.Normalize(settings.Appearance);
             return new Dictionary<string, object>
             {
-                { "Version", state.Version }, { "Items", items },
+                { "Version", TodoState.CurrentVersion }, { "Items", items },
                 { "Settings", new Dictionary<string, object>
                     {
                         { "Left", settings.Left }, { "Top", settings.Top },
@@ -187,6 +191,7 @@ namespace CornerTodo
         private static TodoState FromJson(IDictionary<string, object> root)
         {
             TodoState state = new TodoState();
+            state.Version = 1; // A document without a version belongs to the original schema.
             // An existing document without appearance fields predates appearance
             // settings. Keep its previous white, highly transparent background.
             state.Settings.Appearance = AppearanceSettings.CreateOriginal();
@@ -196,12 +201,18 @@ namespace CornerTodo
                 if (!(value is int)) throw new InvalidDataException("Version 必须为整数。");
                 state.Version = (int)value;
             }
+            ValidateVersion(state.Version);
             if (!root.TryGetValue("Items", out value) || !(value is IEnumerable) || value is string || value is IDictionary)
                 throw new InvalidDataException("缺少有效的 Items 列表。");
 
             foreach (object entry in (IEnumerable)value)
             {
                 IDictionary<string, object> item = AsObject(entry, "待办项");
+                bool hasDeadline = Boolean(item, "HasDeadline", true);
+                if (state.Version == 1 && !hasDeadline)
+                    throw new InvalidDataException("版本 1 的待办数据不能声明无截止日期。");
+                if (!hasDeadline && item.TryGetValue("DueDate", out value) && value != null)
+                    throw new InvalidDataException("无截止日期的事项不能同时保存截止日期。");
                 TodoItem model = new TodoItem
                 {
                     Id = RequiredString(item, "Id"),
@@ -209,7 +220,8 @@ namespace CornerTodo
                     Notes = OptionalNotes(item),
                     Priority = ReadPriority(item),
                     CreatedAt = RequiredDate(item, "CreatedAt"),
-                    DueDate = RequiredDate(item, "DueDate"),
+                    HasDeadline = hasDeadline,
+                    DueDate = hasDeadline ? RequiredDate(item, "DueDate") : DateTime.MinValue,
                     IsCompleted = Boolean(item, "IsCompleted", false),
                     HasTime = Boolean(item, "HasTime", false)
                 };
@@ -259,7 +271,7 @@ namespace CornerTodo
         private static void Validate(TodoState state)
         {
             if (state == null) throw new ArgumentNullException("state");
-            if (state.Version != 1) throw new InvalidDataException("无法读取此版本的待办数据：" + state.Version);
+            ValidateVersion(state.Version);
             if (state.Items == null || state.Settings == null) throw new InvalidDataException("待办列表或窗口设置缺失。");
             HashSet<string> ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (TodoItem item in state.Items)
@@ -268,8 +280,10 @@ namespace CornerTodo
                     throw new InvalidDataException("待办项缺少标识或内容。");
                 if (!ids.Add(item.Id)) throw new InvalidDataException("待办项标识重复。");
                 if (!Enum.IsDefined(typeof(TaskPriority), item.Priority)) throw new InvalidDataException("待办项优先级无效。");
-                if (item.CreatedAt == DateTime.MinValue || item.DueDate == DateTime.MinValue)
+                if (item.CreatedAt == DateTime.MinValue || (item.HasDeadline && item.DueDate == DateTime.MinValue))
                     throw new InvalidDataException("待办项缺少创建时间或截止日期。");
+                if (!item.HasDeadline && (state.Version == 1 || item.DueDate != DateTime.MinValue || item.HasTime || item.DeadlineSetAt.HasValue))
+                    throw new InvalidDataException("无截止日期的事项不能保存日期、具体时刻或计时起点。");
             }
             WidgetSettings settings = state.Settings;
             if (!Enum.IsDefined(typeof(TaskSortMode), settings.SortMode)) throw new InvalidDataException("排序方式无效。");
@@ -277,6 +291,14 @@ namespace CornerTodo
                 throw new InvalidDataException("窗口宽高必须为有效正数。");
             if ((settings.Left.HasValue && !Finite(settings.Left.Value)) || (settings.Top.HasValue && !Finite(settings.Top.Value)))
                 throw new InvalidDataException("窗口位置无效。");
+        }
+
+        private static void ValidateVersion(int version)
+        {
+            // An unsupported schema is not corruption. In particular, never restore
+            // an older backup over a valid future-version main file.
+            if (version != 1 && version != TodoState.CurrentVersion)
+                throw new NotSupportedException("无法读取此版本的待办数据：" + version + "。请使用支持该数据版本的程序；原数据未被改写。");
         }
 
         private static bool Finite(double value) { return !Double.IsNaN(value) && !Double.IsInfinity(value); }

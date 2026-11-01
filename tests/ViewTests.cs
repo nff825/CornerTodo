@@ -37,6 +37,8 @@ internal static class ViewTests
             Run("Notes entry and compact priority labels preserve task state", NotesAndPriorityProjection);
             Run("Sort selection requests and failed-save rollback", SortRequests);
             Run("Thin elapsed-time bars, hover detail and completed visibility", TimeProgressProjection);
+            Run("No-deadline rows preserve task actions without time or attention output", OptionalDeadlineProjection);
+            Run("Slim local scrollbar preserves paging, drag, theme and overflow behavior", SlimScrollbarBehavior);
             Run("Edge capsule counts, palette, reveal requests and restored panel", EdgeCapsuleProjection);
             Assert(application.Windows.Count == 0, "View tests unexpectedly created a Window.");
             TaskEditorTests.Run();
@@ -293,6 +295,102 @@ internal static class ViewTests
         Assert(!Descendants(Row(view, "done")).OfType<Grid>().Any(grid => Object.Equals(grid.Tag, "time-progress")), "Completed row displayed a time bar after repaint.");
     }
 
+    private static void OptionalDeadlineProjection()
+    {
+        TodoState state = Fixture();
+        TodoItem undated = new TodoItem { Id = "undated", Text = "整理实验数据", HasDeadline = false,
+            Priority = TaskPriority.High, CreatedAt = Now.AddDays(-100), Notes = "之后再安排具体日期" };
+        state.Items.Add(undated); string before = StateValue(state);
+        Requests requests = new Requests(); TodoPanelView view = CreateView(requests, state);
+        Assert(Rows(view).Select(row => (string)row.Tag).SequenceEqual(new[] { "overdue", "urgent", "later", "undated", "done" }),
+            "Deadline-first projection should keep undated tasks after every dated pending task.");
+        Grid rowWithoutDate = Row(view, "undated");
+        TextBlock title = Descendants(rowWithoutDate).OfType<TextBlock>().Single(text => text.Text == undated.Text);
+        TextBlock label = Descendants(rowWithoutDate).OfType<TextBlock>().Single(text => Object.Equals(text.Tag, "deadline"));
+        Assert(label.Text == "未设截止" && ((SolidColorBrush)label.Foreground).Color == view.Palette.Muted.Color,
+            "Undated tasks should have a readable secondary-color deadline label.");
+        Assert(title.FontSize == 15 && ((SolidColorBrush)title.Foreground).Color == view.Palette.Ink.Color,
+            "Undated task titles should remain active normal-size text, regardless of task age.");
+        Assert(!Descendants(rowWithoutDate).OfType<Grid>().Any(grid => Object.Equals(grid.Tag, "time-progress")),
+            "Undated tasks should not display even an empty elapsed-time bar.");
+        string tooltip = Tip(rowWithoutDate);
+        Assert(tooltip.Contains("未设截止") && !tooltip.Contains("0001") && !tooltip.Contains("9999") && !tooltip.Contains("时间已用"),
+            "Undated task tooltip exposed a sentinel date or misleading elapsed percentage.");
+        Assert(view.AttentionText.Text == "逾期 1 项 · 6小时内 1 项", "Undated task incorrectly changed attention statistics.");
+        view.SetEdgeHidden(true); Layout(view, 48, 152);
+        Assert(AutomationProperties.GetName(view.EdgeButton).Contains("未完成 4 项，其中逾期 1 项"),
+            "Undated tasks must still count as pending in the edge capsule.");
+        view.SetEdgeHidden(false); Layout(view, 430, 620);
+        view.UpdateTimes(Now.AddYears(3));
+        Assert(Object.ReferenceEquals(rowWithoutDate, Row(view, "undated")) && label.Text == "未设截止" && Tip(rowWithoutDate) == tooltip,
+            "Time refresh added attention or sentinel dates to an undated task.");
+        MenuClick(rowWithoutDate.ContextMenu, "标记为已完成");
+        Assert(requests.Completion.Last().Item1 == undated.Id && requests.Completion.Last().Item2,
+            "Undated task lost its completion action.");
+        state.Settings.SortMode = TaskSortMode.Priority; view.Render(state, Now, false, null); Layout(view, 430, 620);
+        Assert(Rows(view).First().Tag.Equals("undated"), "High-priority undated task should precede lower-priority dated tasks in priority mode.");
+        state.Settings.SortMode = TaskSortMode.Deadline;
+        Assert(StateValue(state) == before, "Projecting or operating on an undated task mutated the caller's state.");
+    }
+
+    private static void SlimScrollbarBehavior()
+    {
+        TodoState state = new TodoState(); state.Settings.AutoExpand = false;
+        for (int i = 0; i < 30; i++) state.Items.Add(Item("slim-" + i, "滚动测试事项 " + i, Now.AddDays(i + 1), false));
+        TodoPanelView view = CreateView(new Requests(), state); Layout(view, 430, 420);
+        ScrollBar bar = (ScrollBar)view.Scroll.Template.FindName("PART_VerticalScrollBar", view.Scroll);
+        Assert(bar != null && bar.Visibility == Visibility.Visible && bar.Orientation == Orientation.Vertical,
+            "Overflow should expose a real vertical ScrollBar in the panel's local template.");
+        Assert(bar.ActualWidth >= 12 && bar.ActualWidth <= 14 && bar.Maximum == view.Scroll.ScrollableHeight &&
+            Math.Abs(bar.ViewportSize - view.Scroll.ViewportHeight) < 1, "Scrollbar hit width or viewport binding is incorrect.");
+        Track track = (Track)bar.Template.FindName("PART_Track", bar);
+        Assert(track != null && track.Thumb != null && track.Thumb.ActualWidth >= 12,
+            "Slim presentation lost the full-width draggable thumb/standard track.");
+        Border indicator = (Border)track.Thumb.Template.FindName("Indicator", track.Thumb);
+        Assert(indicator != null && indicator.ActualWidth >= 4 && indicator.ActualWidth <= 6 && indicator.Opacity > 0,
+            "The slim scrollbar indicator is missing, too wide, or invisible.");
+        Assert(Descendants(bar).OfType<RepeatButton>().Count() == 2 && track.IncreaseRepeatButton.ActualHeight > 0,
+            "Transparent page areas should remain available below the initial thumb position.");
+        view.Scroll.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120) { RoutedEvent = Mouse.MouseWheelEvent });
+        Layout(view, 430, 420);
+        Assert(view.Scroll.VerticalOffset > 0, "Mouse-wheel events stopped scrolling the real styled viewer.");
+        view.Scroll.ScrollToTop(); Layout(view, 430, 420);
+        ScrollBar.PageDownCommand.Execute(null, view.Scroll); Layout(view, 430, 420);
+        Assert(view.Scroll.VerticalOffset > 0, "The viewer's standard keyboard paging command stopped working.");
+        view.Scroll.ScrollToTop(); Layout(view, 430, 420);
+        ScrollBar.PageDownCommand.Execute(null, bar); Layout(view, 430, 420);
+        double afterPage = view.Scroll.VerticalOffset;
+        Assert(afterPage > 0, "Page-down on the styled scrollbar did not scroll its real viewer.");
+        Assert(track.DecreaseRepeatButton.ActualHeight > 0 && track.IncreaseRepeatButton.ActualHeight > 0,
+            "Both transparent page targets should remain available away from the top/bottom edges.");
+        track.Thumb.RaiseEvent(new DragStartedEventArgs(0, 0));
+        track.Thumb.RaiseEvent(new DragDeltaEventArgs(0, 20));
+        track.Thumb.RaiseEvent(new DragCompletedEventArgs(0, 20, false));
+        Layout(view, 430, 420);
+        Assert(view.Scroll.VerticalOffset > afterPage, "Standard thumb dragging stopped working after styling.");
+        Assert(bar.ActualWidth == 14 && indicator.ActualWidth == 5,
+            "Dragging should change the scroll offset without resizing the scrollbar gutter or indicator.");
+        double dragged = view.Scroll.VerticalOffset;
+        AppearanceSettings dark = AppearanceSettings.CreateDark(); dark.BackgroundTransparency = 100;
+        view.Render(state, Now, false, dark); Layout(view, 430, 420);
+        Assert(Math.Abs(view.Scroll.VerticalOffset - dragged) < 1, "Recoloring the scrollbar reset its scroll position.");
+        bar = (ScrollBar)view.Scroll.Template.FindName("PART_VerticalScrollBar", view.Scroll);
+        track = (Track)bar.Template.FindName("PART_Track", bar);
+        indicator = (Border)track.Thumb.Template.FindName("Indicator", track.Thumb);
+        Assert(((SolidColorBrush)indicator.Background).Color.A > 0 && indicator.Opacity > 0 && ((SolidColorBrush)view.Surface.Background).Color.A == 0,
+            "Fully transparent panel preferences made the scrollbar invisible.");
+        Assert(((SolidColorBrush)indicator.Background).Color == ((SolidColorBrush)view.Scroll.Foreground).Color,
+            "The scrollbar did not follow the panel foreground palette.");
+        view.Scroll.ScrollToBottom(); Layout(view, 430, 420);
+        Assert(Math.Abs(view.Scroll.VerticalOffset - view.Scroll.ScrollableHeight) < 1, "The last task could not be reached with the styled scrollbar.");
+        TodoState empty = new TodoState(); view.Render(empty, Now, false, null); Layout(view, 430, 620);
+        Assert(view.Scroll.ComputedVerticalScrollBarVisibility == Visibility.Collapsed, "Non-overflowing content should not reserve a visible scrollbar.");
+        empty.Items.Add(Item("long", new string('长', 500), Now.AddDays(2), false));
+        view.Render(empty, Now, false, null); Layout(view, 310, 300);
+        Assert(view.Scroll.ScrollableHeight > 0 && view.Scroll.ComputedVerticalScrollBarVisibility == Visibility.Visible,
+            "A single long task should retain scrolling when it exceeds the available height.");
+    }
+
     private static void EdgeCapsuleProjection()
     {
         TodoState state = Fixture(); string before = StateValue(state);
@@ -359,7 +457,7 @@ internal static class ViewTests
             .Append('|').Append(settings.AutoExpand).Append('|').Append(settings.EdgeAutoHide).Append('|').Append(settings.Collapsed).Append('|').Append(settings.CompletedCollapsed).Append('|').Append(settings.SortMode);
         AppearanceSettings appearance = settings.Appearance;
         value.Append('|').Append(appearance.BackgroundTransparency).Append('|').Append(appearance.BackgroundColor).Append('|').Append(appearance.PrimaryTextColor).Append('|').Append(appearance.SecondaryTextColor);
-        foreach (TodoItem item in state.Items) value.Append('|').Append(item.Id).Append('|').Append(item.Text).Append('|').Append(item.Notes).Append('|').Append(item.Priority).Append('|').Append(item.IsCompleted).Append('|').Append(item.HasTime)
+        foreach (TodoItem item in state.Items) value.Append('|').Append(item.Id).Append('|').Append(item.Text).Append('|').Append(item.Notes).Append('|').Append(item.Priority).Append('|').Append(item.IsCompleted).Append('|').Append(item.HasDeadline).Append('|').Append(item.HasTime)
             .Append('|').Append(item.CreatedAt.ToString("O", CultureInfo.InvariantCulture)).Append('|').Append(item.DueDate.ToString("O", CultureInfo.InvariantCulture))
             .Append('|').Append(item.CompletedAt.HasValue ? item.CompletedAt.Value.ToString("O", CultureInfo.InvariantCulture) : "null")
             .Append('|').Append(item.DeadlineSetAt.HasValue ? item.DeadlineSetAt.Value.ToString("O", CultureInfo.InvariantCulture) : "null");

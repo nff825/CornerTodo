@@ -38,6 +38,10 @@ internal static class SessionTests
             Run("Sort preference changes are isolated, idempotent and survive restart", SortPreference);
             Run("Edge auto-hide is opt-in, transactional, isolated and persistent", EdgeHidePreference);
             Run("Only an effective deadline change resets full-interval time progress", TimeProgressReschedule);
+            Run("Undated drafts normalize scheduling fields and retain history through completion", NoDeadlineLifecycle);
+            Run("Setting, removing and restoring deadlines use the current scheduling epoch", NoDeadlineScheduling);
+            Run("Failed undated and dated transitions leave committed state unchanged and retry cleanly", NoDeadlineSaveFailures);
+            Run("Undated state survives real restart and legacy session migration never writes", NoDeadlinePersistence);
             Console.WriteLine("PASS: " + passed + " session behavior tests.");
             Console.WriteLine("No WPF, production Data or Windows startup registration is used.");
             return 0;
@@ -272,7 +276,7 @@ internal static class SessionTests
         var session = new TodoSession(writer, Fixture(), false, delegate { return Epoch; });
         session.Edit("fixture-one", Draft("正常提交"));
         TodoState after = session.Snapshot();
-        Assert(after.Version == 1 && after.Items.Single().Text == "正常提交" && after.Settings.Appearance.BackgroundColor == AppearanceSettings.CreateLight().BackgroundColor,
+        Assert(after.Version == TodoState.CurrentVersion && after.Items.Single().Text == "正常提交" && after.Settings.Appearance.BackgroundColor == AppearanceSettings.CreateLight().BackgroundColor,
             "A store mutated the session while saving its argument.");
         writer.DuringSave = null;
         session.SetCompleted("fixture-one", true);
@@ -500,6 +504,113 @@ internal static class SessionTests
         oldSession.Edit(added.Id, edit);
         Assert(Only(oldSession).DeadlineSetAt == null && TodoRules.TimeProgress(Only(oldSession), now) == oldProgress,
             "A legacy record's creation-time fallback was reset by an ordinary edit.");
+    }
+
+    private static TaskDraft UndatedDraft(string text)
+    {
+        return new TaskDraft { Text = text, HasDeadline = false };
+    }
+
+    private static void NoDeadlineLifecycle()
+    {
+        Assert(new TaskDraft().HasDeadline, "Existing editors must default to a scheduled draft.");
+        DateTime now = Epoch; var writer = new RecordingStore();
+        var session = new TodoSession(writer, new TodoState(), false, delegate { return now; });
+        TaskDraft draft = UndatedDraft("  随手记录  "); draft.DueDate = Due; draft.HasTime = true;
+        draft.Notes = "不应有自动到期时间"; draft.Priority = TaskPriority.High;
+        TodoItem item = session.Add(draft);
+        Assert(item.Text == "随手记录" && !item.HasDeadline && item.DueDate == DateTime.MinValue && !item.HasTime && !item.DeadlineSetAt.HasValue,
+            "Unscheduled add retained stale editor scheduling data.");
+        Assert(draft.DueDate == Due && draft.HasTime, "Reading an undated draft mutated the caller's draft.");
+        DateEqual(Epoch, item.CreatedAt, "Unscheduled add changed the creation timestamp");
+        DateTime created = item.CreatedAt; string id = item.Id;
+        now = now.AddDays(100); session.SetCompleted(id, true);
+        TodoItem complete = Only(session); DateTime completedAt = complete.CompletedAt.Value;
+        Assert(complete.IsCompleted && !complete.HasDeadline && TodoRules.TimeProgress(complete, now) == 0,
+            "Completing an undated task created scheduling state.");
+        TaskDraft edit = UndatedDraft("补充文字"); edit.Notes = "多行备注\n第二行"; edit.Priority = TaskPriority.Low;
+        session.Edit(id, edit);
+        TodoItem edited = Only(session);
+        Assert(edited.CompletedAt == completedAt && edited.IsCompleted && edited.Id == id && edited.Notes == edit.Notes && edited.Priority == TaskPriority.Low,
+            "Editing undated details changed completion history or lost details.");
+        session.SetCompleted(id, false);
+        TodoItem restored = Only(session);
+        Assert(!restored.IsCompleted && restored.CompletedAt == null && !restored.HasDeadline && restored.DueDate == DateTime.MinValue &&
+            !restored.HasTime && !restored.DeadlineSetAt.HasValue && restored.Id == id, "Restoring undated history acquired a deadline.");
+        DateEqual(created, restored.CreatedAt, "Undated lifecycle reset creation history");
+        session.SetSortMode(TaskSortMode.Priority); session.SetAppearance(AppearanceSettings.CreateOriginal());
+        session.SetEdgeAutoHide(true); session.SaveGeometry(10, 20, 430, 475);
+        Assert(!Only(session).HasDeadline && !Only(session).DeadlineSetAt.HasValue, "A settings change scheduled an undated task.");
+    }
+
+    private static void NoDeadlineScheduling()
+    {
+        DateTime now = Epoch; var session = new TodoSession(new RecordingStore(), new TodoState(), false, delegate { return now; });
+        TodoItem added = session.Add(UndatedDraft("稍后安排"));
+        now = Epoch.AddDays(10); TaskDraft scheduled = Draft("现在安排", now.AddDays(4), true);
+        session.Edit(added.Id, scheduled); TodoItem dated = Only(session);
+        Assert(dated.HasDeadline && dated.HasTime && dated.DeadlineSetAt == now && dated.CreatedAt == Epoch,
+            "Adding a deadline did not start its own scheduling interval or reset creation history.");
+        Assert(TodoRules.TimeProgress(dated, now) == 0, "A new deadline inherited the old undated creation interval.");
+        now = now.AddDays(2); Assert(Math.Abs(TodoRules.TimeProgress(dated, now) - 0.5) < 0.000000001, "New scheduling interval did not advance linearly.");
+        scheduled.Text = "只改文字"; scheduled.Notes = "备注"; scheduled.Priority = TaskPriority.High;
+        session.Edit(added.Id, scheduled);
+        Assert(Only(session).DeadlineSetAt == dated.DeadlineSetAt, "Ordinary details restarted the new interval.");
+        TaskDraft remove = UndatedDraft("取消截止"); remove.DueDate = dated.DueDate; remove.HasTime = true;
+        session.Edit(added.Id, remove); TodoItem undated = Only(session);
+        Assert(!undated.HasDeadline && undated.DueDate == DateTime.MinValue && !undated.HasTime && !undated.DeadlineSetAt.HasValue,
+            "Removing a deadline did not clear its scheduling fields.");
+        Assert(!TodoRules.IsOverdue(undated, now.AddYears(1)) && TodoRules.Urgency(undated, now) == 0 && TodoRules.TimeProgress(undated, now) == 0,
+            "Removed deadline still caused time attention.");
+        now = now.AddDays(3); scheduled.DueDate = now.AddDays(5); session.Edit(added.Id, scheduled);
+        Assert(Only(session).DeadlineSetAt == now && Only(session).CreatedAt == Epoch && TodoRules.TimeProgress(Only(session), now) == 0,
+            "Re-adding a deadline reused a removed scheduling epoch.");
+        scheduled.HasTime = false; scheduled.DueDate = now.Date; session.Edit(added.Id, scheduled);
+        Assert(TodoRules.Deadline(Only(session)) == now.Date.AddDays(1), "Scheduled date-only task no longer lasts to next midnight.");
+    }
+
+    private static void NoDeadlineSaveFailures()
+    {
+        var writer = new RecordingStore(); DateTime now = Epoch;
+        var session = new TodoSession(writer, Fixture(), false, delegate { return now; });
+        TodoState before = session.Snapshot();
+        writer.DuringSave = delegate(TodoState received) { received.Items.Clear(); throw new IOException("模拟写入失败"); };
+        ExpectSaveFailure(delegate { session.Edit("fixture-one", UndatedDraft("取消截止")); });
+        Equal(before, session.Snapshot(), "Failed deadline removal changed committed state");
+        ExpectSaveFailure(delegate { session.Add(UndatedDraft("新无日期事项")); });
+        Equal(before, session.Snapshot(), "Failed undated add created an item");
+        writer.DuringSave = null; session.Edit("fixture-one", UndatedDraft("取消截止"));
+        Assert(!Only(session).HasDeadline, "Retrying deadline removal did not commit.");
+        before = session.Snapshot(); now = Epoch.AddDays(2);
+        writer.DuringSave = delegate(TodoState received) { received.Items[0].HasDeadline = true; throw new UnauthorizedAccessException("无写权限"); };
+        ExpectSaveFailure(delegate { session.Edit("fixture-one", Draft("补充截止")); });
+        Equal(before, session.Snapshot(), "Failed deadline assignment acquired scheduling state");
+        writer.DuringSave = null; session.Edit("fixture-one", Draft("补充截止"));
+        Assert(Only(session).HasDeadline && Only(session).DeadlineSetAt == now, "Retrying deadline assignment did not use the current epoch.");
+        before = session.Snapshot(); TaskDraft invalid = Draft("缺少有效日期", DateTime.MinValue, true);
+        ExpectBusinessFailure(delegate { session.Edit("fixture-one", invalid); });
+        Equal(before, session.Snapshot(), "Invalid dated input changed committed state");
+    }
+
+    private static void NoDeadlinePersistence()
+    {
+        var writer = new RecordingStore(); TodoState legacy = Fixture(); legacy.Version = 1;
+        var legacySession = new TodoSession(writer, legacy, false, delegate { return Epoch; });
+        Assert(writer.Arguments.Count == 0 && legacy.Version == 1 && legacySession.Snapshot().Version == 2 && Only(legacySession).HasDeadline,
+            "Constructing a legacy session wrote data, changed the source state or lost its deadline.");
+        TodoStore store = new TodoStore(Path.Combine(temporaryRoot, "no-deadline-restart"));
+        var session = new TodoSession(store, legacySession.Snapshot(), false, delegate { return Epoch; });
+        TodoItem item = session.Add(UndatedDraft("跨重启保留")); session.SetCompleted(item.Id, true);
+        TodoState before = session.Snapshot();
+        var restarted = new TodoSession(store, store.Load(), false, delegate { return Epoch.AddDays(2); });
+        Equal(before, restarted.Snapshot(), "Restart lost mixed dated and undated history");
+        restarted.SetCompleted(item.Id, false);
+        Assert(!store.Load().Items.Single(i => i.Id == item.Id).HasDeadline, "Reopening an undated task assigned a date on disk.");
+        byte[] saved = File.ReadAllBytes(store.DataFilePath); TodoState committed = restarted.Snapshot();
+        using (new FileStream(store.DataFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            ExpectSaveFailure(delegate { restarted.Edit(item.Id, Draft("尝试补充截止")); });
+        Equal(committed, restarted.Snapshot(), "Locked real save partially assigned a deadline");
+        Assert(saved.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Locked optional-deadline save changed the data bytes.");
     }
 
     private static void ExpectBusinessFailure(Action action)

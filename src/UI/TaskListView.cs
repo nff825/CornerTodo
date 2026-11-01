@@ -116,13 +116,13 @@ namespace CornerTodo
             due.Tag = "deadline";
             due.Margin = new Thickness(0, 4, 0, 0);
             textArea.Children.Add(due);
-            if (!item.IsCompleted) textArea.Children.Add(TimeBar(item, now, palette));
+            if (!item.IsCompleted && item.HasDeadline) textArea.Children.Add(TimeBar(item, now, palette));
             Grid.SetColumn(textArea, 1); row.Children.Add(textArea);
             DateTime localDue = item.DueDate.Kind == DateTimeKind.Utc ? item.DueDate.ToLocalTime() : item.DueDate;
-            string description = item.Text + "\n截止：" + localDue.ToString(item.HasTime ? "yyyy年M月d日 HH:mm" : "yyyy年M月d日");
-            var rowTip = new ToolTip { Content = description + (item.IsCompleted ? "" : "\n" + ProgressLabel(item, now)) };
+            string description = item.Text + (item.HasDeadline ? "\n截止：" + localDue.ToString(item.HasTime ? "yyyy年M月d日 HH:mm" : "yyyy年M月d日") : "\n未设截止");
+            var rowTip = new ToolTip { Content = description + (item.IsCompleted || !item.HasDeadline ? "" : "\n" + ProgressLabel(item, now)) };
             row.ToolTip = rowTip;
-            if (!item.IsCompleted) timeRefreshers.Add(delegate(DateTime current) {
+            if (!item.IsCompleted && item.HasDeadline) timeRefreshers.Add(delegate(DateTime current) {
                 bool past = TodoRules.IsOverdue(item, current), soon = TodoRules.IsUrgent(item, current);
                 due.Text = TodoRules.FormatAttention(item, current);
                 due.Foreground = past ? palette.Warning : soon ? palette.Urgent : palette.Muted;
@@ -153,7 +153,7 @@ namespace CornerTodo
             foreach (TaskSortMode choice in new[] { TaskSortMode.Deadline, TaskSortMode.Priority }) {
                 TaskSortMode value = choice;
                 var option = new MenuItem { Header = SortLabel(value), IsCheckable = true, IsChecked = mode == value,
-                    Tag = value, ToolTip = value == TaskSortMode.Priority ? "高 → 中 → 低，同级按截止时间排序" : "越早截止越靠前" };
+                    Tag = value, ToolTip = value == TaskSortMode.Priority ? "高 → 中 → 低，同级有截止的在前，无截止的在后" : "有截止的按日期排列，无截止的在后" };
                 option.Click += delegate {
                     bool saved = actions.SetSortMode != null && actions.SetSortMode(value);
                     // State belongs to the coordinator. Keep the existing projection

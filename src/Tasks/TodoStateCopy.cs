@@ -29,7 +29,7 @@ namespace CornerTodo
             return new TodoItem {
                 Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsCompleted = item.IsCompleted,
                 CreatedAt = item.CreatedAt, CompletedAt = item.CompletedAt,
-                DueDate = item.DueDate, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt
+                DueDate = item.DueDate, HasDeadline = item.HasDeadline, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt
             };
         }
     }

@@ -18,6 +18,54 @@ namespace CornerTodo
         {
             return new TextBlock { Text = text, FontSize = size, Foreground = color, TextWrapping = TextWrapping.Wrap };
         }
+        // Local to the main panel. Keep standard ScrollViewer/Track commands,
+        // viewport sizing and input handling; only replace their presentation.
+        public static Style PanelScrollViewer()
+        {
+            return (Style)XamlReader.Parse(@"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ScrollViewer'>
+<Setter Property='Background' Value='Transparent'/>
+<Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ScrollViewer'>
+<ControlTemplate.Resources>
+  <Style x:Key='PanelScrollBar' TargetType='ScrollBar'>
+    <Setter Property='Width' Value='14'/><Setter Property='MinWidth' Value='14'/><Setter Property='MaxWidth' Value='14'/>
+    <Setter Property='Background' Value='Transparent'/><Setter Property='Focusable' Value='False'/>
+    <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ScrollBar'>
+      <Grid Background='Transparent'>
+        <Track x:Name='PART_Track' Orientation='Vertical' IsDirectionReversed='True'
+               Minimum='{TemplateBinding Minimum}' Maximum='{TemplateBinding Maximum}'
+               Value='{TemplateBinding Value}' ViewportSize='{TemplateBinding ViewportSize}'>
+          <Track.DecreaseRepeatButton><RepeatButton Command='{x:Static ScrollBar.PageUpCommand}' Focusable='False'>
+            <RepeatButton.Template><ControlTemplate TargetType='RepeatButton'><Border Background='Transparent'/></ControlTemplate></RepeatButton.Template>
+          </RepeatButton></Track.DecreaseRepeatButton>
+          <Track.Thumb><Thumb x:Name='PanelThumb' MinHeight='24' Foreground='{TemplateBinding Foreground}' Focusable='False'>
+            <Thumb.Template><ControlTemplate TargetType='Thumb'>
+              <Grid Background='Transparent'><Border x:Name='Indicator' Width='5' CornerRadius='2.5' Margin='0,2' Background='{TemplateBinding Foreground}' Opacity='0.55'/></Grid>
+              <ControlTemplate.Triggers>
+                <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Indicator' Property='Opacity' Value='0.85'/></Trigger>
+                <Trigger Property='IsDragging' Value='True'><Setter TargetName='Indicator' Property='Opacity' Value='1'/></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate></Thumb.Template>
+          </Thumb></Track.Thumb>
+          <Track.IncreaseRepeatButton><RepeatButton Command='{x:Static ScrollBar.PageDownCommand}' Focusable='False'>
+            <RepeatButton.Template><ControlTemplate TargetType='RepeatButton'><Border Background='Transparent'/></ControlTemplate></RepeatButton.Template>
+          </RepeatButton></Track.IncreaseRepeatButton>
+        </Track>
+      </Grid>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+</ControlTemplate.Resources>
+<Grid Background='{TemplateBinding Background}'>
+  <Grid.ColumnDefinitions><ColumnDefinition Width='*'/><ColumnDefinition Width='Auto'/></Grid.ColumnDefinitions>
+  <ScrollContentPresenter x:Name='PART_ScrollContentPresenter' Grid.Column='0' Margin='0,0,3,0' ClipToBounds='True'
+      CanContentScroll='{TemplateBinding CanContentScroll}' Content='{TemplateBinding Content}'
+      ContentTemplate='{TemplateBinding ContentTemplate}'/>
+  <ScrollBar x:Name='PART_VerticalScrollBar' Grid.Column='1' Orientation='Vertical' Style='{StaticResource PanelScrollBar}'
+      Foreground='{TemplateBinding Foreground}' Minimum='0' Maximum='{TemplateBinding ScrollableHeight}'
+      ViewportSize='{TemplateBinding ViewportHeight}' Value='{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}'
+      Visibility='{TemplateBinding ComputedVerticalScrollBarVisibility}'/>
+</Grid>
+</ControlTemplate></Setter.Value></Setter></Style>");
+        }
         public static Style FlatButton()
         {
             return (Style)XamlReader.Parse(@"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'>

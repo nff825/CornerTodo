@@ -21,11 +21,12 @@ internal static class TaskEditorTests
         checks = 0;
         DefaultsAndEntryPoints();
         TimePickerSelectionAndTyping();
+        OptionalDeadlineDrafts();
         SaveDraftAndPreserveInput();
         ValidationAndClearing();
         PersistenceFailureAndRetry();
         CancelAndSmallLayout();
-        Console.WriteLine("PASS: task editor time-picker/notes/priority behaviors, " + checks + " checks (unshown WPF windows).");
+        Console.WriteLine("PASS: task editor optional-deadline/time-picker/notes/priority behaviors, " + checks + " checks (unshown WPF windows).");
     }
 
     private static TodoItem Fixture()
@@ -41,6 +42,7 @@ internal static class TaskEditorTests
     {
         WithEditor(null, false, delegate(TaskEditor editor, LayoutHost host) {
             Assert(!host.Find<Expander>("展开或收起备注").IsExpanded, "New task notes should start collapsed.");
+            Assert(host.Find<CheckBox>("设置截止日期").IsChecked == true, "New tasks should retain deadline-enabled defaults.");
             Assert(host.Find<RadioButton>("优先级：中").IsChecked == true, "New task priority should be normal.");
             Assert(host.Find<TextBox>("备注，选填").Text.Length == 0, "New task notes should be empty.");
             Assert(FocusManager.GetFocusedElement(editor) == host.Find<TextBox>("待办事项"), "New task entry should focus its task text.");
@@ -149,6 +151,70 @@ internal static class TaskEditorTests
             ScrollViewer body = host.Find<ScrollViewer>("待办编辑内容");
             Assert(Fits(hour, body) && Fits(minute, body), "Small editors must keep both clock fields visible together after scrolling to their row.");
             Assert(Fits(host.Find<Button>("保存待办"), host.Canvas), "Scrolling to the clock fields displaced the fixed save action.");
+        });
+    }
+
+    private static void OptionalDeadlineDrafts()
+    {
+        TodoItem dated = Fixture(); string before = ItemValue(dated);
+        int attempts = 0; TaskDraft attempted = null;
+        WithEditor(dated, false, delegate(TaskDraft draft) { attempts++; attempted = draft; return attempts > 1; },
+            delegate(TaskEditor editor, LayoutHost host) {
+                CheckBox enabled = host.Find<CheckBox>("设置截止日期");
+                StackPanel deadlineBody = host.Find<StackPanel>("截止日期与时刻设置");
+                DatePicker date = host.Find<DatePicker>("截止日期");
+                ComboBox hour = host.Find<ComboBox>("截止小时，24小时制");
+                Assert(deadlineBody.Visibility == Visibility.Visible, "Dated editors should initially show date/time controls.");
+                enabled.IsChecked = false; host.Layout();
+                Assert(deadlineBody.Visibility == Visibility.Collapsed && host.Find<TextBlock>("无截止日期说明").Visibility == Visibility.Visible && host.Find<TextBlock>("无截止日期说明").ActualHeight > 0,
+                    "Disabling the deadline must collapse its entire control group and show the no-deadline hint.");
+                enabled.IsChecked = true; host.Layout();
+                Assert(deadlineBody.Visibility == Visibility.Visible && date.SelectedDate == dated.DueDate.ToLocalTime().Date &&
+                    hour.Text == dated.DueDate.ToLocalTime().ToString("HH"), "Toggling the deadline discarded the draft date/time.");
+                enabled.IsChecked = false;
+                date.Text = ""; hour.Text = "invalid";
+                host.Find<TextBox>("待办事项").Text = "没有明确期限的事项";
+                host.Find<TextBox>("备注，选填").Text = "先记下来，之后再安排";
+                Click(host.Find<Button>("保存待办"), false);
+                Assert(attempts == 1 && attempted != null && !attempted.HasDeadline && !attempted.HasTime && attempted.DueDate == DateTime.MinValue,
+                    "Hidden invalid date/time fields should not prevent submitting a canonical no-deadline draft.");
+                Assert(editor.Result == null && enabled.IsChecked == false && host.Find<TextBox>("备注，选填").Text == "先记下来，之后再安排",
+                    "A failed no-deadline save lost draft fields or published a result.");
+                Click(host.Find<Button>("保存待办"), true);
+                Assert(editor.Result != null && !editor.Result.HasDeadline && editor.Result.Notes == attempted.Notes,
+                    "Retrying a no-deadline draft failed to save it.");
+                Assert(ItemValue(dated) == before, "Removing a deadline in the editor mutated the supplied task.");
+            });
+
+        TodoItem undated = Fixture(); undated.HasDeadline = false; undated.DueDate = DateTime.MinValue;
+        undated.HasTime = false; undated.DeadlineSetAt = null;
+        WithEditor(undated, false, delegate(TaskEditor editor, LayoutHost host) {
+            CheckBox enabled = host.Find<CheckBox>("设置截止日期");
+            Assert(enabled.IsChecked == false && host.Find<StackPanel>("截止日期与时刻设置").Visibility == Visibility.Collapsed,
+                "Opening an undated task should not enable its deadline or expose a year-one date.");
+            enabled.IsChecked = true; host.Layout();
+            DatePicker date = host.Find<DatePicker>("截止日期");
+            Assert(date.SelectedDate == DateTime.Today && host.Find<ComboBox>("截止小时，24小时制").Text == "18",
+                "Adding a first deadline should start from a usable date/time draft.");
+            date.Text = "";
+            Click(host.Find<Button>("保存待办"), false);
+            Assert(editor.Result == null && host.Find<TextBlock>("待办编辑错误提示").Text.Contains("日期"),
+                "After enabling a deadline the editor must validate its date again.");
+            date.SelectedDate = new DateTime(2026, 11, 7);
+            host.Find<CheckBox>("设置具体时刻").IsChecked = true;
+            host.Find<ComboBox>("截止小时，24小时制").Text = "17";
+            host.Find<ComboBox>("截止分钟").Text = "23";
+            Click(host.Find<Button>("保存待办"), true);
+            Assert(editor.Result != null && editor.Result.HasDeadline && editor.Result.HasTime && editor.Result.DueDate == new DateTime(2026, 11, 7, 17, 23, 0),
+                "Adding a deadline to an undated task did not return its chosen exact date/time.");
+        });
+        WithEditor(null, false, delegate(TaskEditor editor, LayoutHost host) {
+            host.Find<TextBox>("待办事项").Text = "随手记录";
+            host.Find<CheckBox>("设置截止日期").IsChecked = false;
+            host.Width = 320; host.Height = 300; host.Layout();
+            Assert(Fits(host.Find<Button>("保存待办"), host.Canvas), "No-deadline editor lost its fixed save button in a small work area.");
+            Click(host.Find<Button>("保存待办"), true);
+            Assert(editor.Result != null && !editor.Result.HasDeadline, "New tasks could not be saved without a deadline.");
         });
     }
 
@@ -354,7 +420,7 @@ internal static class TaskEditorTests
     }
     private static string ItemValue(TodoItem item)
     {
-        return item.Id + "|" + item.Text + "|" + item.Notes + "|" + item.Priority + "|" + item.DueDate.ToString("O") + "|" + item.DueDate.Kind + "|" + item.HasTime + "|" + item.DeadlineSetAt;
+        return item.Id + "|" + item.Text + "|" + item.Notes + "|" + item.Priority + "|" + item.HasDeadline + "|" + item.DueDate.ToString("O") + "|" + item.DueDate.Kind + "|" + item.HasTime + "|" + item.DeadlineSetAt;
     }
     private static void Assert(bool condition, string message)
     {

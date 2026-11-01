@@ -25,6 +25,9 @@ namespace CornerTodo
             if (now == null) throw new ArgumentNullException("now");
             this.store = store; this.preview = preview; this.now = now;
             current = TodoStateCopy.Copy(initialState);
+            if (current.Version != 1 && current.Version != TodoState.CurrentVersion)
+                throw new NotSupportedException("无法读取此版本的待办数据：" + current.Version + "。请使用支持该数据版本的程序。");
+            current.Version = TodoState.CurrentVersion;
         }
 
         public TodoState Snapshot()
@@ -38,8 +41,8 @@ namespace CornerTodo
             DateTime savedAt = now();
             var item = new TodoItem {
                 Id = Guid.NewGuid().ToString("N"), Text = input.Text, Notes = input.Notes, Priority = input.Priority,
-                DueDate = input.DueDate, HasTime = input.HasTime,
-                CreatedAt = savedAt, DeadlineSetAt = savedAt
+                DueDate = input.DueDate, HasDeadline = input.HasDeadline, HasTime = input.HasTime,
+                CreatedAt = savedAt, DeadlineSetAt = input.HasDeadline ? (DateTime?)savedAt : null
             };
             var next = Snapshot();
             next.Items.Add(item);
@@ -53,10 +56,12 @@ namespace CornerTodo
             int index = Find(id);
             TodoState next = Snapshot();
             TodoItem item = next.Items[index];
+            bool previouslyScheduled = item.HasDeadline;
             DateTime previousDeadline = TodoRules.Deadline(item);
             item.Text = input.Text; item.Notes = input.Notes; item.Priority = input.Priority;
-            item.DueDate = input.DueDate; item.HasTime = input.HasTime;
-            if (TodoRules.Deadline(item) != previousDeadline) item.DeadlineSetAt = now();
+            item.DueDate = input.DueDate; item.HasDeadline = input.HasDeadline; item.HasTime = input.HasTime;
+            if (!item.HasDeadline) item.DeadlineSetAt = null;
+            else if (!previouslyScheduled || TodoRules.Deadline(item) != previousDeadline) item.DeadlineSetAt = now();
             Commit(next);
         }
 
@@ -132,6 +137,7 @@ namespace CornerTodo
 
         private void Commit(TodoState next)
         {
+            next.Version = TodoState.CurrentVersion;
             // A writer may retain or even mutate its input. Neither that reference
             // nor an exception can modify the state already owned by this session.
             if (!preview) store.Save(TodoStateCopy.Copy(next));
@@ -150,11 +156,13 @@ namespace CornerTodo
         {
             if (draft == null) throw new ArgumentNullException("draft");
             if (String.IsNullOrWhiteSpace(draft.Text)) throw new ArgumentException("请填写待办事项。", "draft");
-            if (draft.DueDate == DateTime.MinValue) throw new ArgumentException("请选择有效的截止日期。", "draft");
+            if (draft.HasDeadline && draft.DueDate == DateTime.MinValue) throw new ArgumentException("请选择有效的截止日期。", "draft");
             if (!Enum.IsDefined(typeof(TaskPriority), draft.Priority)) throw new ArgumentException("请选择有效的优先级。", "draft");
             string notes = draft.Notes ?? "";
             if (notes.Length > TodoRules.MaxNotesLength) throw new ArgumentException("备注最多可填写 " + TodoRules.MaxNotesLength + " 个字符。", "draft");
-            return new TaskDraft { Text = draft.Text.Trim(), Notes = notes, Priority = draft.Priority, DueDate = draft.DueDate, HasTime = draft.HasTime };
+            return new TaskDraft { Text = draft.Text.Trim(), Notes = notes, Priority = draft.Priority,
+                HasDeadline = draft.HasDeadline, DueDate = draft.HasDeadline ? draft.DueDate : DateTime.MinValue,
+                HasTime = draft.HasDeadline && draft.HasTime };
         }
 
         private static bool Finite(double value)

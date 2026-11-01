@@ -11,6 +11,9 @@ namespace CornerTodo
     internal sealed class TaskEditor : Window
     {
         private readonly TextBox taskText;
+        private readonly CheckBox useDeadline;
+        private readonly StackPanel deadlineFields;
+        private readonly TextBlock noDeadlineHint;
         private readonly DatePicker date;
         private readonly CheckBox useTime;
         private readonly ComboBox hour;
@@ -24,6 +27,7 @@ namespace CornerTodo
         private readonly TextBlock error;
         private readonly TodoItem original;
         private readonly Func<TaskDraft, bool> saveDraft;
+        private readonly double fullEditorHeight;
         public TaskDraft Result { get; private set; }
 
         public TaskEditor(TodoItem item) : this(item, false) { }
@@ -34,11 +38,12 @@ namespace CornerTodo
         {
             original = item;
             this.saveDraft = saveDraft;
-            DateTime displayedDue = item == null ? DateTime.Today :
+            DateTime displayedDue = item == null || !item.HasDeadline ? DateTime.Today :
                 item.DueDate.Kind == DateTimeKind.Utc ? item.DueDate.ToLocalTime() : item.DueDate;
             Title = item == null ? "添加待办" : "编辑待办";
             bool showNotes = focusNotes || (item != null && !String.IsNullOrEmpty(item.Notes));
-            Width = 460; Height = showNotes ? 690 : 535;
+            fullEditorHeight = showNotes ? 690 : 535;
+            Width = 460; Height = fullEditorHeight - (item != null && !item.HasDeadline ? 85 : 0);
             MinWidth = 320; MinHeight = 300;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -65,17 +70,23 @@ namespace CornerTodo
                 TextWrapping = TextWrapping.Wrap, MaxLength = 500, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 Padding = new Thickness(10, 8, 10, 8), Background = Brushes.White, BorderBrush = Theme.Brush("#BDD0D8"), FontSize = 15 };
             AutomationProperties.SetName(taskText, "待办事项"); fields.Children.Add(taskText);
-            var dueLabel = Theme.Text("截止日期", 13, Theme.Muted); dueLabel.Margin = new Thickness(0, 14, 0, 7); fields.Children.Add(dueLabel);
+            useDeadline = new CheckBox { Content = "设置截止日期", IsChecked = item == null || item.HasDeadline,
+                Foreground = Theme.Ink, Margin = new Thickness(0, 16, 0, 7) };
+            AutomationProperties.SetName(useDeadline, "设置截止日期"); fields.Children.Add(useDeadline);
+            noDeadlineHint = Theme.Text("未设截止，可随时补充", 12, Theme.Muted);
+            AutomationProperties.SetName(noDeadlineHint, "无截止日期说明"); fields.Children.Add(noDeadlineHint);
+            deadlineFields = new StackPanel();
+            AutomationProperties.SetName(deadlineFields, "截止日期与时刻设置"); fields.Children.Add(deadlineFields);
             date = new DatePicker { SelectedDate = displayedDue.Date,
                 SelectedDateFormat = DatePickerFormat.Long, FontSize = 14, Padding = new Thickness(5),
                 Language = System.Windows.Markup.XmlLanguage.GetLanguage("zh-CN") };
             date.DateValidationError += delegate(object sender, DatePickerDateValidationErrorEventArgs e) { e.ThrowException = false; };
-            AutomationProperties.SetName(date, "截止日期"); fields.Children.Add(date);
+            AutomationProperties.SetName(date, "截止日期"); deadlineFields.Children.Add(date);
             var timeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
-            useTime = new CheckBox { Content = "设置具体时刻", IsChecked = item != null && item.HasTime, VerticalAlignment = VerticalAlignment.Center };
+            useTime = new CheckBox { Content = "设置具体时刻", IsChecked = item != null && item.HasDeadline && item.HasTime, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(useTime, "设置具体时刻");
-            hour = TimePart(24, item != null && item.HasTime ? displayedDue.Hour : 18, "截止小时，24小时制");
-            minute = TimePart(60, item != null && item.HasTime ? displayedDue.Minute : 0, "截止分钟");
+            hour = TimePart(24, item != null && item.HasDeadline && item.HasTime ? displayedDue.Hour : 18, "截止小时，24小时制");
+            minute = TimePart(60, item != null && item.HasDeadline && item.HasTime ? displayedDue.Minute : 0, "截止分钟");
             hour.Margin = new Thickness(14, 0, 0, 0);
             hour.IsEnabled = minute.IsEnabled = useTime.IsChecked == true;
             useTime.Checked += delegate { hour.IsEnabled = minute.IsEnabled = true; };
@@ -83,7 +94,10 @@ namespace CornerTodo
             var separator = Theme.Text(":", 15, Theme.Ink); separator.Width = 14;
             separator.TextAlignment = TextAlignment.Center; separator.VerticalAlignment = VerticalAlignment.Center;
             timeRow.Children.Add(useTime); timeRow.Children.Add(hour); timeRow.Children.Add(separator); timeRow.Children.Add(minute);
-            fields.Children.Add(timeRow);
+            deadlineFields.Children.Add(timeRow);
+            useDeadline.Checked += delegate { UpdateDeadlineFields(); };
+            useDeadline.Unchecked += delegate { UpdateDeadlineFields(); };
+            UpdateDeadlineFields();
             var priorityLabel = Theme.Text("优先级", 13, Theme.Muted); priorityLabel.Margin = new Thickness(0, 16, 0, 7); fields.Children.Add(priorityLabel);
             var priorities = new Grid();
             for (int i = 0; i < 3; i++) priorities.ColumnDefinitions.Add(new ColumnDefinition());
@@ -178,38 +192,51 @@ namespace CornerTodo
             notesCount.Foreground = notes.Text.Length > TodoRules.MaxNotesLength ? Theme.Warning : Theme.Muted;
         }
 
+        private void UpdateDeadlineFields()
+        {
+            bool enabled = useDeadline.IsChecked == true;
+            deadlineFields.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            noDeadlineHint.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible;
+            Height = Math.Max(MinHeight, Math.Min(MaxHeight, fullEditorHeight - (enabled ? 0 : 85)));
+        }
+
         private void Save()
         {
             string text = taskText.Text.Trim();
             if (text.Length == 0) { error.Text = "请填写待办事项。"; taskText.Focus(); return; }
             if (notes.Text.Length > TodoRules.MaxNotesLength)
             { error.Text = "备注最多可填写" + TodoRules.MaxNotesLength.ToString(CultureInfo.InvariantCulture) + "个字符，请精简后保存。"; notesSection.IsExpanded = true; notes.Focus(); notes.BringIntoView(); return; }
-            DateTime selected;
-            if (String.IsNullOrWhiteSpace(date.Text) || !DateTime.TryParse(date.Text, CultureInfo.GetCultureInfo("zh-CN"), DateTimeStyles.AllowWhiteSpaces, out selected))
-            { error.Text = "请选择有效的截止日期。"; date.Focus(); return; }
-            DateTime due = selected.Date;
-            if (useTime.IsChecked == true)
+            bool hasDeadline = useDeadline.IsChecked == true;
+            bool hasTime = hasDeadline && useTime.IsChecked == true;
+            DateTime due = DateTime.MinValue;
+            if (hasDeadline)
             {
-                int selectedHour, selectedMinute;
-                if (!TryTimePart(hour, 23, out selectedHour))
-                { error.Text = "请选择或填写有效时刻：小时为00–23。"; hour.Focus(); return; }
-                if (!TryTimePart(minute, 59, out selectedMinute))
-                { error.Text = "请选择或填写有效时刻：分钟为00–59。"; minute.Focus(); return; }
-                hour.Text = selectedHour.ToString("00", CultureInfo.InvariantCulture);
-                minute.Text = selectedMinute.ToString("00", CultureInfo.InvariantCulture);
-                due = due.AddHours(selectedHour).AddMinutes(selectedMinute);
+                DateTime selected;
+                if (String.IsNullOrWhiteSpace(date.Text) || !DateTime.TryParse(date.Text, CultureInfo.GetCultureInfo("zh-CN"), DateTimeStyles.AllowWhiteSpaces, out selected))
+                { error.Text = "请选择有效的截止日期。"; date.Focus(); return; }
+                due = selected.Date;
+                if (hasTime)
+                {
+                    int selectedHour, selectedMinute;
+                    if (!TryTimePart(hour, 23, out selectedHour))
+                    { error.Text = "请选择或填写有效时刻：小时为00–23。"; hour.Focus(); return; }
+                    if (!TryTimePart(minute, 59, out selectedMinute))
+                    { error.Text = "请选择或填写有效时刻：分钟为00–59。"; minute.Focus(); return; }
+                    hour.Text = selectedHour.ToString("00", CultureInfo.InvariantCulture);
+                    minute.Text = selectedMinute.ToString("00", CultureInfo.InvariantCulture);
+                    due = due.AddHours(selectedHour).AddMinutes(selectedMinute);
+                }
             }
             // Keep the original precision and time kind when the visible deadline
             // fields were not changed, including legacy deadlines with seconds.
-            bool hasTime = useTime.IsChecked == true;
-            if (original != null && hasTime == original.HasTime)
+            if (hasDeadline && original != null && original.HasDeadline && hasTime == original.HasTime)
             {
                 DateTime localOriginal = original.DueDate.Kind == DateTimeKind.Utc ? original.DueDate.ToLocalTime() : original.DueDate;
                 if (due.Date == localOriginal.Date && (!hasTime || (due.Hour == localOriginal.Hour && due.Minute == localOriginal.Minute)))
                     due = original.DueDate;
             }
             TaskPriority priority = highPriority.IsChecked == true ? TaskPriority.High : lowPriority.IsChecked == true ? TaskPriority.Low : TaskPriority.Normal;
-            var draft = new TaskDraft { Text = text, DueDate = due, HasTime = hasTime, Notes = notes.Text, Priority = priority };
+            var draft = new TaskDraft { Text = text, HasDeadline = hasDeadline, DueDate = due, HasTime = hasTime, Notes = notes.Text, Priority = priority };
             // Keep the editable fields open until persistence succeeds, so a
             // transient disk failure cannot discard a long note or other input.
             if (saveDraft != null && !saveDraft(draft))

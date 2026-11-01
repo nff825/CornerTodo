@@ -80,7 +80,9 @@ namespace CornerTodo
             Root.Children.Add(Header);
             taskList = new TaskListView(actions);
             Scroll = new ScrollViewer { Content = taskList.List, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, PanningMode = PanningMode.VerticalOnly };
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, PanningMode = PanningMode.VerticalOnly,
+                Style = Theme.PanelScrollViewer() };
+            AutomationProperties.SetName(Scroll, "待办事项列表");
             Grid.SetRow(Scroll, 1); Root.Children.Add(Scroll);
             var footer = new Grid { Margin = new Thickness(0, 8, 0, 0) };
             AddButton = new Button { Content = "+  添加待办", FontSize = 15, Style = Theme.FlatButton(), HorizontalAlignment = HorizontalAlignment.Left,
@@ -163,6 +165,7 @@ namespace CornerTodo
             StatusText.Foreground = Palette.Warning;
             CollapseButton.Style = MoreButton.Style = AddButton.Style = Palette.ButtonStyle;
             ToolbarSurface.Background = Palette.ToolbarBackground;
+            Scroll.Foreground = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Palette.Muted;
             Grip.Template = Palette.ResizeTemplate;
             EdgeButton.Style = Palette.ButtonStyle;
             edgePending.Foreground = Palette.Ink;

@@ -45,8 +45,9 @@ internal static class OffscreenUiTests
             ValidateBaselineSave();
             ValidateLegacyUtcEditor();
             ValidateSortPersistence();
+            RenderOptionalDeadlinePreviews(now);
             EdgeUiTests.Run(outputDirectory);
-            Report.AppendLine("PASS: " + assertions + " assertions across 3 rendered scenarios.");
+            Report.AppendLine("PASS: " + assertions + " assertions across 3 deadline scenarios and optional-deadline theme/editor renders.");
             Report.AppendLine("Scope: control tree, layout, typography, counts, completed decoration, settings state, render pixels and fake-host baseline persistence.");
             Report.AppendLine("Live desktop z-order, animations and native input are intentionally outside this offscreen check.");
             File.WriteAllText(Path.Combine(outputDirectory, "ui-validation.txt"), Report.ToString(), new UTF8Encoding(false));
@@ -147,6 +148,70 @@ internal static class OffscreenUiTests
             Assert(new WindowInteropHelper(window).Handle == IntPtr.Zero, "Offscreen checks unexpectedly created an HWND.");
         }
         finally { window.Close(); }
+    }
+
+    private static void RenderOptionalDeadlinePreviews(DateTime now)
+    {
+        TodoState state = new TodoState(); state.Settings.AutoExpand = false;
+        state.Items.Add(Item("dated-one", "向李老师汇报研究进展", now.Date.AddDays(2).AddHours(17), now.AddDays(-1), false));
+        state.Items[0].Priority = TaskPriority.High;
+        TodoItem second = Item("dated-two", "提交本月研究小结", now.Date.AddDays(5), now.AddDays(-2), false);
+        second.HasTime = false; state.Items.Add(second);
+        string[] titles = { "整理实验数据", "阅读新方向文献", "整理书架", "补充研究参考资料" };
+        for (int index = 0; index < titles.Length; index++) state.Items.Add(new TodoItem {
+            Id = "undated-" + index, Text = titles[index], HasDeadline = false,
+            Priority = index == 0 ? TaskPriority.Normal : TaskPriority.Low, CreatedAt = now.AddDays(-7 + index)
+        });
+        state.Items.Add(Item("done", "完成阶段实验记录归档", now.AddHours(-1), now.AddDays(-3), true));
+        AppearanceSettings[] themes = { AppearanceSettings.CreateLight(), AppearanceSettings.CreateDark(), AppearanceSettings.CreateDark() };
+        themes[2].BackgroundTransparency = 100;
+        string[] names = { "no-deadline-panel", "no-deadline-panel-dark", "no-deadline-panel-transparent" };
+        for (int index = 0; index < themes.Length; index++)
+        {
+            TodoPanelView view = new TodoPanelView(new TodoViewActions());
+            TextElement.SetFontFamily(view.Surface, new FontFamily("Microsoft YaHei UI"));
+            view.Surface.UseLayoutRounding = true; view.Surface.SnapsToDevicePixels = true;
+            view.Render(state, now, true, themes[index]);
+            Grid canvas = new Grid { Background = index == 0 ? Theme.Brush("#AFCFD9") : Theme.Brush("#132631") };
+            canvas.Children.Add(view.Surface); WritePreview(canvas, 430, 475, names[index]);
+            Assert(view.Scroll.ScrollableHeight > 0 && view.Scroll.ComputedVerticalScrollBarVisibility == Visibility.Visible,
+                "Optional-deadline fixture must overflow so its slim scrollbar is a real viewport indicator.");
+            foreach (Grid row in view.List.Children.OfType<Grid>().Where(row => (row.Tag as string ?? "").StartsWith("undated-", StringComparison.Ordinal)))
+            {
+                Assert(!Descendants(row).OfType<Grid>().Any(grid => Object.Equals(grid.Tag, "time-progress")), "Undated preview row displayed an elapsed bar.");
+                Assert(Descendants(row).OfType<TextBlock>().Any(text => text.Text == "未设截止"), "Undated preview row lost its status label.");
+            }
+            Assert(view.AttentionText.Text == "逾期 0 项 · 6小时内 0 项", "Undated preview fixture contributed to attention statistics.");
+            view.Scroll.ScrollToBottom(); canvas.UpdateLayout();
+            Assert(Math.Abs(view.Scroll.VerticalOffset - view.Scroll.ScrollableHeight) < 1, "Optional-deadline preview cannot reach its final row.");
+        }
+        TaskEditor editor = new TaskEditor(state.Items.First(item => !item.HasDeadline));
+        try
+        {
+            FrameworkElement content = (FrameworkElement)editor.Content; editor.Content = null;
+            TextElement.SetFontFamily(content, editor.FontFamily); TextElement.SetFontSize(content, editor.FontSize);
+            var canvas = new Grid { Background = editor.Background }; canvas.Children.Add(content);
+            WritePreview(canvas, editor.Width, editor.Height, "no-deadline-editor");
+            Assert(Field<CheckBox>(editor, "useDeadline").IsChecked == false && Field<StackPanel>(editor, "deadlineFields").Visibility == Visibility.Collapsed,
+                "Undated editor preview should collapse date/time controls while keeping its enable option.");
+            Button save = Descendants(canvas).OfType<Button>().Single(button => System.Windows.Automation.AutomationProperties.GetName(button) == "保存待办");
+            Rect bounds = save.TransformToAncestor(canvas).TransformBounds(new Rect(new Point(), save.RenderSize));
+            Assert(bounds.Bottom <= canvas.ActualHeight && bounds.Right <= canvas.ActualWidth, "Undated editor preview clipped its save action.");
+            Assert(new WindowInteropHelper(editor).Handle == IntPtr.Zero, "Optional-deadline rendering created a native editor window.");
+        }
+        finally { editor.Close(); }
+        Report.AppendLine("  optional deadline previews: light/dark/transparent overflow lists and undated editor rendered with production controls.");
+    }
+
+    private static void WritePreview(Grid canvas, double width, double height, string name)
+    {
+        canvas.Width = width; canvas.Height = height;
+        canvas.Measure(new Size(width, height)); canvas.Arrange(new Rect(0, 0, width, height)); canvas.UpdateLayout();
+        Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(delegate { })); canvas.UpdateLayout();
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(width * Scale), (int)Math.Ceiling(height * Scale), Dpi, Dpi, PixelFormats.Pbgra32);
+        bitmap.Render(canvas);
+        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using (FileStream output = File.Create(Path.Combine(outputDirectory, name + ".png"))) encoder.Save(output);
     }
 
     private static void ValidateSortPersistence()
