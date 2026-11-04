@@ -132,7 +132,9 @@ internal sealed class TaskEditorWindow : Window
             if (due.Date == local.Date && (!hasTime || (due.Hour == local.Hour && due.Minute == local.Minute))) due = original.DueDate;
         }
         return new TaskDraft { Text = text, Notes = notes, DueDate = due, HasDeadline = true, HasTime = hasTime,
-            Priority = priority };
+            Priority = priority,
+            ReminderEnabled = hasTime && original?.ReminderEnabled == true,
+            ReminderMinutesBefore = hasTime && original?.ReminderEnabled == true ? original.ReminderMinutesBefore : 0 };
     }
 
     internal static bool TryParseEditorDate(string? text, out DateTime selected)

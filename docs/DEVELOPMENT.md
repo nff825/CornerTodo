@@ -146,6 +146,17 @@ README 新增的三张展示图为实际 WPF 控件渲染，分别是 `docs/imag
 - 新图 `docs/images/unified-panel.png` 与 `unified-dark-panel.png` 仅为合成数据的真实WPF离屏控件渲染，展示样式；原生置顶、Win+D、Explorer重启及多屏/DPI需另做实机检查。AI设计图不进入实际截图说明。
 - Mac 开发前端本次不新增悬浮UI；共享存储应保留Windows新字段。原Mac alpha.1附件仍保持旧版格式，不能读取v3，本次不重打包或覆盖它。
 
+## v1.8.0 提醒计划与Version4
+
+- `ReminderRules`负责提前时长（最多3650天23小时59分钟）、UTC差值运算和日期界限校验，向界面返回安全的本地预览或null。UI把天时分合成一个分钟数，勾选后才展开；无具体截止时刻不启用。
+- `TodoItem`保存ReminderEnabled、ReminderMinutesBefore、ReminderPlanId、ReminderSetAt及ReminderHandledAt。`TaskDraft`只携带用户设置，不允许界面写处理记录。有效截止、提前值或重新启用变化时创建新计划；只改正文等保留原计划和处理状态。
+- `TodoSession.ClaimDueReminders`在候选快照中认领到点项，先一次保存处理状态，再返回独立快照；写盘失败不展示新项。最近24小时有效遗漏可合并提示，较早记录和新建／修改后已经过去的提醒不补弹。每批最多366项。
+- 重复规则保存提醒设置和启用时间，`PreparedOccurrences`保存尚未被日历游标覆盖的已提前生成日期。检查只扫描提醒窗口附近的日历候选；到提醒时可提前物化未来或当期事项，同时保持未处理历史游标。删除后保留期次标记，日历生成跳过它们；推进游标后清理覆盖范围的标记。修改后续周期会重置提醒生效时间，已生成事项保持原快照。
+- `ReminderController`与普通面板刷新分开，每5秒检查；只由本应用编辑／菜单／模态阻塞，不由普通hover阻塞。持有已认领但尚未成功展示的active批次；新的认领保存失败不妨碍已认领卡片重试。Dispose停止计时、解除事件并清理卡片。
+- `ReminderWindowPresenter`管理一个独立非激活置顶窗口，多个事项合并；相同列表只更新时间文字，避免移动点击目标。查看／完成按ID及PlanId验证当前计划，关闭只清理当前提示。MainWindow同步最新session状态并在任务变化后撤销陈旧卡片。
+- Version4显式保存所有计划与期次标记。旧1..3载入只在内存迁移，提醒默认关闭；未知未来格式不回退覆盖。Mac共享源码读写同一格式并保留提醒字段，但没有接入Mac提醒调度／卡片。原Macalpha1和旧Windows不能读v4。
+- Reminder核心与ReminderUi调度／卡片是独立测试组，提醒编辑器并入View，登记功能组共14组。真实原生焦点、投递和休眠恢复仍应独立试用；离屏图片只证明布局和控件状态。
+
 ## 路径一：Windows PowerShell 脚本
 
 在项目根目录使用 **Windows PowerShell** 运行：

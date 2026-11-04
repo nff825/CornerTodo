@@ -42,6 +42,7 @@ namespace CornerTodo.MacTests
                 Check(StoreTests.Main(), "shared storage");
                 Check(SessionTests.Main(), "shared task session");
                 Check(RecurrenceTests.Main(), "shared recurring tasks");
+                Check(ReminderTests.Main(), "shared reminders");
                 Check(GrowthLayoutTests.Main(), "shared growth layout");
                 SerializerContract();
                 Paths(owned);
@@ -49,10 +50,11 @@ namespace CornerTodo.MacTests
                 WindowsNoDeadlineFixture(owned);
                 WindowsRecurringFixture(owned);
                 WindowsDisplayPreferences(owned);
+                WindowsReminderPreferences(owned);
                 LegacyDatesAndLiteralNotes(owned);
                 int singleInstanceAssertions = SingleInstanceTests.Run(owned);
                 File.WriteAllText(Path.Combine(owned, "verification.json"), JsonSerializer.Serialize(new {
-                    sharedSuites = new[] { "Store", "Session", "Recurrence", "Growth" }, sharedSuitesPassed = true,
+                    sharedSuites = new[] { "Store", "Session", "Recurrence", "Reminder", "Growth" }, sharedSuitesPassed = true,
                     adapterAndCompatibilityAssertions = assertions, testDataRoot = owned,
                     singleInstanceAssertions = singleInstanceAssertions,
                     productionDataRead = false, nativeMacExecutionVerified = false,
@@ -295,6 +297,35 @@ namespace CornerTodo.MacTests
                 "Rejecting a future schema changed the original file, its backup or its classification.");
         }
 
+        private static void WindowsReminderPreferences(string output)
+        {
+            string directory = Path.Combine(output, "windows-reminder-preferences");
+            DateTime now = new DateTime(2026, 11, 4, 12, 0, 0);
+            var store = new TodoStore(directory);
+            var session = new TodoSession(store, new TodoState(), false, () => now);
+            TodoItem item = session.Add(new TaskDraft { Text = "保留Windows提醒配置", Notes = "仅验证共享数据", HasDeadline = true,
+                HasTime = true, DueDate = new DateTime(2026, 11, 20, 17, 0, 0), ReminderEnabled = true,
+                ReminderMinutesBefore = 1440 + 120 + 30 });
+            TodoState loaded = store.Load();
+            TodoItem saved = loaded.Items.Single();
+            Assert(loaded.Version == TodoState.CurrentVersion && saved.ReminderEnabled && saved.ReminderMinutesBefore == 1590 &&
+                saved.ReminderPlanId == item.ReminderPlanId && saved.ReminderSetAt == item.ReminderSetAt && saved.ReminderHandledAt == null,
+                "Mac serialization lost Windows reminder configuration or its pending plan identity.");
+            Assert(ReminderRules.GetReminderTime(saved) == new DateTime(2026, 11, 19, 14, 30, 0),
+                "The shared reminder duration changed its intended local reminder time.");
+            session.SaveGeometry(12, 24, 430, 475);
+            Assert(store.Load().Items.Single().ReminderPlanId == item.ReminderPlanId,
+                "A Mac geometry write reset a Windows reminder plan.");
+            now = new DateTime(2026, 11, 19, 14, 30, 0);
+            Assert(session.ClaimDueReminders().Count == 1, "The shared synthetic reminder did not become claimable.");
+            TodoItem handled = store.Load().Items.Single();
+            Assert(handled.ReminderHandledAt.HasValue && handled.ReminderPlanId == item.ReminderPlanId,
+                "Mac serialization dropped a reminder receipt.");
+            var restarted = new TodoSession(store, store.Load(), false, () => now.AddMinutes(1));
+            Assert(restarted.ClaimDueReminders().Count == 0,
+                "A shared reminder receipt did not prevent restart duplication.");
+        }
+
         private static void WindowsDisplayPreferences(string output)
         {
             string directory = Path.Combine(output, "windows-display-preferences");
@@ -307,7 +338,7 @@ namespace CornerTodo.MacTests
                 CreatedAt = now.AddDays(-2), DueDate = now.AddDays(-1), HasTime = true });
             var store = new TodoStore(directory); store.Save(state);
             var loaded = store.Load();
-            Assert(loaded.Version == 3 && loaded.Settings.AlwaysOnTop && loaded.Settings.AutoExpand &&
+            Assert(loaded.Version == TodoState.CurrentVersion && loaded.Settings.AlwaysOnTop && loaded.Settings.AutoExpand &&
                 !loaded.Settings.FloatingAutoExpand && !loaded.Settings.EffectiveAutoExpand,
                 "The Mac store did not preserve independent Windows display preferences in schema three.");
             Assert(TodoRules.Expansion(loaded, now) == 1,
@@ -328,7 +359,7 @@ namespace CornerTodo.MacTests
                 "The Mac desktop expansion toggle did not persist independently or modified a task.");
             using (JsonDocument json = JsonDocument.Parse(File.ReadAllText(store.DataFilePath, Encoding.UTF8))) {
                 JsonElement settings = json.RootElement.GetProperty("Settings");
-                Assert(json.RootElement.GetProperty("Version").GetInt32() == 3 &&
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == TodoState.CurrentVersion &&
                     settings.GetProperty("AlwaysOnTop").GetBoolean() &&
                     !settings.GetProperty("FloatingAutoExpand").GetBoolean() &&
                     settings.GetProperty("AutoExpand").GetBoolean() &&

@@ -13,6 +13,7 @@
     <Compile Include="../../tests/StoreTests.cs" Link="Shared/StoreTests.cs" />
     <Compile Include="../../tests/SessionTests.cs" Link="Shared/SessionTests.cs" />
     <Compile Include="../../tests/RecurrenceTests.cs" Link="Shared/RecurrenceTests.cs" />
+    <Compile Include="../../tests/ReminderTests.cs" Link="Shared/ReminderTests.cs" />
     <Compile Include="../../tests/GrowthLayoutTests.cs" Link="Shared/GrowthLayoutTests.cs" />
     <Compile Include="../Desktop/SingleInstance.cs" Link="Desktop/SingleInstance.cs" />
     <None Update="Fixtures/windows-v1.4.0.json" CopyToOutputDirectory="PreserveNewest" />
