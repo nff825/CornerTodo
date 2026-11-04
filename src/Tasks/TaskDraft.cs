@@ -12,6 +12,8 @@ namespace CornerTodo
         public DateTime DueDate { get; set; }
         public bool HasDeadline { get; set; }
         public bool HasTime { get; set; }
+        public bool ReminderEnabled { get; set; }
+        public int ReminderMinutesBefore { get; set; }
         public RecurrenceOptions Recurrence { get; set; }
     }
 }

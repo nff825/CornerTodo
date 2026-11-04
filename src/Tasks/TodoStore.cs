@@ -161,7 +161,11 @@ namespace CornerTodo
                     { "DeadlineSetAt", item.DeadlineSetAt.HasValue ? DateText(item.DeadlineSetAt.Value) : null },
                     { "RecurringRuleId", item.RecurringRuleId },
                     { "OccurrenceDate", item.OccurrenceDate.HasValue ? DateText(item.OccurrenceDate.Value) : null },
-                    { "RepeatLabel", item.RepeatLabel }
+                    { "RepeatLabel", item.RepeatLabel },
+                    { "ReminderEnabled", item.ReminderEnabled }, { "ReminderMinutesBefore", item.ReminderMinutesBefore },
+                    { "ReminderPlanId", item.ReminderPlanId },
+                    { "ReminderSetAt", item.ReminderSetAt.HasValue ? DateText(item.ReminderSetAt.Value) : null },
+                    { "ReminderHandledAt", item.ReminderHandledAt.HasValue ? DateText(item.ReminderHandledAt.Value) : null }
                 });
             }
             List<object> rules = new List<object>();
@@ -173,6 +177,9 @@ namespace CornerTodo
                     { "DeadlineOffsetDays", rule.DeadlineOffsetDays }, { "DeadlineTimeTicks", rule.DeadlineTimeTicks },
                     { "IsPaused", rule.IsPaused }, { "IsStopped", rule.IsStopped },
                     { "ProcessedThrough", rule.ProcessedThrough.HasValue ? DateText(rule.ProcessedThrough.Value) : null },
+                    { "ReminderEnabled", rule.ReminderEnabled }, { "ReminderMinutesBefore", rule.ReminderMinutesBefore },
+                    { "ReminderSetAt", rule.ReminderSetAt.HasValue ? DateText(rule.ReminderSetAt.Value) : null },
+                    { "PreparedOccurrences", rule.PreparedOccurrences.ConvertAll(DateText) },
                     { "Recurrence", new Dictionary<string, object> {
                         { "Frequency", (int)repeat.Frequency }, { "WeekDays", repeat.WeekDays },
                         { "DayOfMonth", repeat.DayOfMonth }, { "UseLastDay", repeat.UseLastDay }, { "StartDate", DateText(repeat.StartDate) }
@@ -243,7 +250,11 @@ namespace CornerTodo
                     HasDeadline = hasDeadline,
                     DueDate = hasDeadline ? RequiredDate(item, "DueDate") : DateTime.MinValue,
                     IsCompleted = Boolean(item, "IsCompleted", false),
-                    HasTime = Boolean(item, "HasTime", false)
+                    HasTime = Boolean(item, "HasTime", false),
+                    ReminderEnabled = Boolean(item, "ReminderEnabled", false),
+                    ReminderMinutesBefore = Integer(item, "ReminderMinutesBefore", 0),
+                    ReminderPlanId = OptionalText(item, "ReminderPlanId"),
+                    ReminderSetAt = OptionalDate(item, "ReminderSetAt"), ReminderHandledAt = OptionalDate(item, "ReminderHandledAt")
                 };
                 if (item.TryGetValue("CompletedAt", out value) && value != null)
                     model.CompletedAt = ParseDate(value, "CompletedAt");
@@ -268,6 +279,8 @@ namespace CornerTodo
                         HasTime = Boolean(fields, "HasTime", false), DeadlineOffsetDays = Integer(fields, "DeadlineOffsetDays", 0),
                         DeadlineTimeTicks = LongInteger(fields, "DeadlineTimeTicks", 0),
                         IsPaused = Boolean(fields, "IsPaused", false), IsStopped = Boolean(fields, "IsStopped", false),
+                        ReminderEnabled = Boolean(fields, "ReminderEnabled", false), ReminderMinutesBefore = Integer(fields, "ReminderMinutesBefore", 0),
+                        ReminderSetAt = OptionalDate(fields, "ReminderSetAt"),
                         Recurrence = new RecurrenceOptions {
                             Frequency = (RecurrenceFrequency)Integer(repeat, "Frequency", 0),
                             WeekDays = Integer(repeat, "WeekDays", 2), DayOfMonth = Integer(repeat, "DayOfMonth", 1),
@@ -276,6 +289,10 @@ namespace CornerTodo
                     };
                     object cursor;
                     if (fields.TryGetValue("ProcessedThrough", out cursor) && cursor != null) rule.ProcessedThrough = ParseDate(cursor, "ProcessedThrough");
+                    if (fields.TryGetValue("PreparedOccurrences", out cursor) && cursor != null) {
+                        if (!(cursor is IEnumerable) || cursor is string || cursor is IDictionary) throw new InvalidDataException("提前生成的周期列表无效。");
+                        foreach (object prepared in (IEnumerable)cursor) rule.PreparedOccurrences.Add(ParseDate(prepared, "PreparedOccurrences"));
+                    }
                     state.RecurringRules.Add(rule);
                 }
             }
@@ -329,6 +346,7 @@ namespace CornerTodo
             Dictionary<string, RecurringTaskRule> ruleLookup = new Dictionary<string, RecurringTaskRule>(StringComparer.Ordinal);
             foreach (RecurringTaskRule rule in state.RecurringRules) {
                 RecurringTasks.Validate(rule);
+                if (state.Version < 4 && (rule.ReminderEnabled || rule.PreparedOccurrences.Count > 0)) throw new InvalidDataException("旧格式不能保存提醒计划或提前生成的周期。");
                 if (!ruleIds.Add(rule.Id)) throw new InvalidDataException("重复规则标识重复。");
                 ruleLookup.Add(rule.Id, rule);
             }
@@ -345,6 +363,8 @@ namespace CornerTodo
                     throw new InvalidDataException("待办项缺少创建时间或截止日期。");
                 if (!item.HasDeadline && (state.Version == 1 || item.DueDate != DateTime.MinValue || item.HasTime || item.DeadlineSetAt.HasValue))
                     throw new InvalidDataException("无截止日期的事项不能保存日期、具体时刻或计时起点。");
+                ReminderRules.ValidateItem(item);
+                if (state.Version < 4 && item.ReminderEnabled) throw new InvalidDataException("旧格式不能保存提醒计划。");
                 if (String.IsNullOrEmpty(item.RecurringRuleId)) {
                     if (item.OccurrenceDate.HasValue || !String.IsNullOrEmpty(item.RepeatLabel)) throw new InvalidDataException("普通事项不能保存孤立的重复标识。");
                 }
@@ -353,7 +373,8 @@ namespace CornerTodo
                         item.OccurrenceDate.Value.Kind == DateTimeKind.Utc || item.OccurrenceDate.Value.TimeOfDay != TimeSpan.Zero ||
                         String.IsNullOrWhiteSpace(item.RepeatLabel)) throw new InvalidDataException("重复事项缺少有效规则、周期日期或历史说明。");
                     RecurringTaskRule owner = ruleLookup[item.RecurringRuleId];
-                    if (!owner.ProcessedThrough.HasValue || item.OccurrenceDate.Value > owner.ProcessedThrough.Value)
+                    if ((!owner.ProcessedThrough.HasValue || item.OccurrenceDate.Value > owner.ProcessedThrough.Value) &&
+                        !owner.PreparedOccurrences.Contains(item.OccurrenceDate.Value))
                         throw new InvalidDataException("重复事项的周期超出已保存的处理进度。");
                     string occurrenceKey = item.RecurringRuleId + "|" + item.OccurrenceDate.Value.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
                     if (!occurrenceKeys.Add(occurrenceKey)) throw new InvalidDataException("同一规则的同一期事项重复。");
@@ -377,6 +398,11 @@ namespace CornerTodo
 
         private static bool Finite(double value) { return !Double.IsNaN(value) && !Double.IsInfinity(value); }
         private static string DateText(DateTime value) { return value.ToString("o", CultureInfo.InvariantCulture); }
+        private static DateTime? OptionalDate(IDictionary<string, object> fields, string name)
+        {
+            object value;
+            return fields.TryGetValue(name, out value) && value != null ? (DateTime?)ParseDate(value, name) : null;
+        }
 
         private static IDictionary<string, object> AsObject(object value, string field)
         {

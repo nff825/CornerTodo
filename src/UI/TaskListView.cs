@@ -99,6 +99,23 @@ namespace CornerTodo
                 Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(0, 2, 0, 0),
                 Background = Tint(palette.Ink, 16), Tag = "priority", ToolTip = "优先级：" + priorityText.Text };
             AutomationProperties.SetName(priority, "优先级：" + priorityText.Text); details.Children.Add(priority);
+            DateTime? reminderAt = ReminderRules.GetReminderTime(item);
+            string reminderDescription = null;
+            if (reminderAt.HasValue) {
+                DateTime localReminder = reminderAt.Value.Kind == DateTimeKind.Utc ? reminderAt.Value.ToLocalTime() : reminderAt.Value;
+                reminderDescription = ReminderRules.FormatLeadTime(item.ReminderMinutesBefore) + "提醒 · " + localReminder.ToString("yyyy年M月d日 HH:mm", CultureInfo.InvariantCulture)
+                    + (item.ReminderHandledAt.HasValue ? "（已处理）" : "");
+                if (!item.IsCompleted) {
+                    var reminder = new Button { Content = new System.Windows.Shapes.Path {
+                        Data = Geometry.Parse("M 3,13 L 4.5,11 L 4.5,6 A 4,4 0 0 1 12.5,6 L 12.5,11 L 14,13 Z M 7,15 A 1.5,1.5 0 0 0 10,15"),
+                        Stroke = palette.Muted, StrokeThickness = 1.2, Width = 14, Height = 17, Stretch = Stretch.Uniform },
+                        Style = palette.ButtonStyle, Width = 24, Height = 26, Padding = new Thickness(4, 3, 4, 3),
+                        Margin = new Thickness(3, 0, 0, 0), ToolTip = reminderDescription, Tag = "reminder" };
+                    AutomationProperties.SetName(reminder, "查看提醒设置：" + item.Text);
+                    reminder.Click += delegate(object sender, RoutedEventArgs e) { e.Handled = true; if (actions.Edit != null) actions.Edit(item); };
+                    details.Children.Add(reminder);
+                }
+            }
             if (!String.IsNullOrWhiteSpace(item.Notes)) {
                 var note = new Button { Content = new System.Windows.Shapes.Path {
                     Data = Geometry.Parse("M 2,1 L 10,1 L 14,5 L 14,17 L 2,17 Z M 10,1 L 10,5 L 14,5 M 5,8 L 11,8 M 5,11 L 11,11 M 5,14 L 9,14"),
@@ -123,6 +140,7 @@ namespace CornerTodo
             DateTime localDue = item.DueDate.Kind == DateTimeKind.Utc ? item.DueDate.ToLocalTime() : item.DueDate;
             string description = item.Text + (item.HasDeadline ? "\n截止：" + localDue.ToString(item.HasTime ? "yyyy年M月d日 HH:mm" : "yyyy年M月d日") : "\n未设截止");
             if (!String.IsNullOrEmpty(item.RepeatLabel)) description += "\n重复：" + item.RepeatLabel;
+            if (reminderDescription != null) description += "\n提醒：" + reminderDescription;
             var rowTip = new ToolTip { Content = description + (item.IsCompleted || !item.HasDeadline ? "" : "\n" + ProgressLabel(item, now)) };
             row.ToolTip = rowTip;
             if (!item.IsCompleted && item.HasDeadline) timeRefreshers.Add(delegate(DateTime current) {

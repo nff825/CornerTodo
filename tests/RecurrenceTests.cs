@@ -296,7 +296,7 @@ internal static class RecurrenceTests
     {
         var store = new TodoStore(Path.Combine(root, "persist")); var s = new TodoSession(store, store.Load(), false, delegate { return clock; });
         TodoItem item = s.Add(Draft(Options(RecurrenceFrequency.Daily))); s.Delete(item.Id);
-        string json = File.ReadAllText(store.DataFilePath); Assert(json.Contains("\"Version\":3") && json.Contains("\"RecurringRules\""), "v3 rule not explicit.");
+        string json = File.ReadAllText(store.DataFilePath); Assert(json.Contains("\"Version\":" + TodoState.CurrentVersion) && json.Contains("\"RecurringRules\""), "Current rule format not explicit.");
         var restarted = new TodoSession(store, store.Load(), false, delegate { return clock; });
         Assert(restarted.GenerateCurrentRecurrences() == 0 && restarted.Snapshot().Items.Count == 0, "Deleted period reappeared after actual restart.");
         clock = clock.AddDays(1); restarted.GenerateCurrentRecurrences();
@@ -304,11 +304,11 @@ internal static class RecurrenceTests
     }
     private static void LegacyVersions()
     {
-        for (int version = 1; version <= 2; version++) {
+        for (int version = 1; version <= 3; version++) {
             var store = new TodoStore(Path.Combine(root, "legacy-" + version)); Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
             string raw = "{\"Version\":" + version + ",\"Items\":[{\"Id\":\"legacy\",\"Text\":\"原有事项\",\"CreatedAt\":\"2026-10-20T00:00:00.0000000\",\"DueDate\":\"2026-11-10T00:00:00.0000000\"}]}";
             File.WriteAllText(store.DataFilePath, raw, new UTF8Encoding(false)); byte[] before = File.ReadAllBytes(store.DataFilePath);
-            TodoState loaded = store.Load(); Assert(loaded.Version == 3 && loaded.RecurringRules.Count == 0 && loaded.Items.Single().RecurringRuleId == null, "Legacy migration invented repeat.");
+            TodoState loaded = store.Load(); Assert(loaded.Version == TodoState.CurrentVersion && loaded.RecurringRules.Count == 0 && loaded.Items.Single().RecurringRuleId == null, "Legacy migration invented repeat.");
             Assert(before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)) && !File.Exists(store.DataFilePath + ".bak"), "Legacy read wrote data.");
         }
     }
@@ -329,7 +329,7 @@ internal static class RecurrenceTests
     private static void FutureVersion()
     {
         var store = new TodoStore(Path.Combine(root, "future")); store.Save(new TodoState()); store.Save(new TodoState());
-        string future = File.ReadAllText(store.DataFilePath).Replace("\"Version\":3", "\"Version\":99"); File.WriteAllText(store.DataFilePath, future, new UTF8Encoding(false));
+        string future = File.ReadAllText(store.DataFilePath).Replace("\"Version\":" + TodoState.CurrentVersion, "\"Version\":99"); File.WriteAllText(store.DataFilePath, future, new UTF8Encoding(false));
         byte[] main = File.ReadAllBytes(store.DataFilePath), backup = File.ReadAllBytes(store.DataFilePath + ".bak");
         Throws<NotSupportedException>(delegate { store.Load(); });
         Assert(main.SequenceEqual(File.ReadAllBytes(store.DataFilePath)) && backup.SequenceEqual(File.ReadAllBytes(store.DataFilePath + ".bak")), "Future version altered files.");

@@ -19,6 +19,13 @@ namespace CornerTodo
         private readonly CheckBox useTime;
         private readonly ComboBox hour;
         private readonly ComboBox minute;
+        private readonly CheckBox useReminder;
+        private readonly StackPanel reminderFields;
+        private readonly TextBlock reminderAvailability;
+        private readonly ComboBox reminderDays;
+        private readonly ComboBox reminderHours;
+        private readonly ComboBox reminderMinutes;
+        private readonly TextBlock reminderSummary;
         private readonly TextBox notes;
         private readonly Expander notesSection;
         private readonly TextBlock notesCount;
@@ -61,7 +68,7 @@ namespace CornerTodo
             editingRule = initialRecurrence != null;
             Title = editingRule ? "修改后续重复规则" : item == null ? "添加待办" : "编辑待办";
             bool showNotes = focusNotes || (item != null && !String.IsNullOrEmpty(item.Notes));
-            fullEditorHeight = (showNotes ? 690 : 535) + (allowRecurrence ? 36 : 26);
+            fullEditorHeight = (showNotes ? 690 : 535) + (allowRecurrence ? 36 : 26) + 40;
             Width = 460; Height = fullEditorHeight - (item != null && !item.HasDeadline ? 85 : 0);
             MinWidth = 320; MinHeight = 300;
             ResizeMode = ResizeMode.NoResize;
@@ -108,8 +115,8 @@ namespace CornerTodo
             minute = TimePart(60, item != null && item.HasDeadline && item.HasTime ? displayedDue.Minute : 0, "截止分钟");
             hour.Margin = new Thickness(14, 0, 0, 0);
             hour.IsEnabled = minute.IsEnabled = useTime.IsChecked == true;
-            useTime.Checked += delegate { hour.IsEnabled = minute.IsEnabled = true; };
-            useTime.Unchecked += delegate { hour.IsEnabled = minute.IsEnabled = false; };
+            useTime.Checked += delegate { hour.IsEnabled = minute.IsEnabled = true; UpdateReminderAvailability(); };
+            useTime.Unchecked += delegate { hour.IsEnabled = minute.IsEnabled = false; UpdateReminderAvailability(); };
             var separator = Theme.Text(":", 15, Theme.Ink); separator.Width = 14;
             separator.TextAlignment = TextAlignment.Center; separator.VerticalAlignment = VerticalAlignment.Center;
             timeRow.Children.Add(useTime); timeRow.Children.Add(hour); timeRow.Children.Add(separator); timeRow.Children.Add(minute);
@@ -117,6 +124,34 @@ namespace CornerTodo
             useDeadline.Checked += delegate { UpdateDeadlineFields(); };
             useDeadline.Unchecked += delegate { UpdateDeadlineFields(); };
             UpdateDeadlineFields();
+            useReminder = new CheckBox { Content = "提醒我", IsChecked = item != null && item.ReminderEnabled && item.HasDeadline && item.HasTime,
+                Margin = new Thickness(0, 14, 0, 6), Foreground = Theme.Ink };
+            AutomationProperties.SetName(useReminder, "提醒我"); fields.Children.Add(useReminder);
+            reminderAvailability = Theme.Text("请先设置截止日期和具体时刻。", 11, Theme.Muted);
+            AutomationProperties.SetName(reminderAvailability, "提醒启用说明"); fields.Children.Add(reminderAvailability);
+            reminderFields = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            AutomationProperties.SetName(reminderFields, "提醒提前时长设置"); fields.Children.Add(reminderFields);
+            int lead = item != null && item.ReminderEnabled ? Math.Max(0, Math.Min(ReminderRules.MaxMinutes, item.ReminderMinutesBefore)) : 15;
+            var reminderParts = new WrapPanel { Margin = new Thickness(0, 2, 0, 3) };
+            var before = Theme.Text("提前", 12, Theme.Muted); before.Margin = new Thickness(0, 6, 8, 0); reminderParts.Children.Add(before);
+            reminderDays = ReminderPart(ReminderRules.MaxDays, lead / 1440, "提醒提前天数", false);
+            reminderHours = ReminderPart(23, (lead % 1440) / 60, "提醒提前小时数", true);
+            reminderMinutes = ReminderPart(59, lead % 60, "提醒提前分钟数", true);
+            AddReminderPart(reminderParts, reminderDays, "天"); AddReminderPart(reminderParts, reminderHours, "小时"); AddReminderPart(reminderParts, reminderMinutes, "分钟");
+            reminderFields.Children.Add(reminderParts);
+            var reminderHint = Theme.Text("可点选或输入；全部为0时，到期提醒。", 11, Theme.Muted);
+            reminderHint.Margin = new Thickness(0, 2, 0, 4); reminderFields.Children.Add(reminderHint);
+            reminderSummary = Theme.Text("", 12, Theme.Accent); reminderSummary.Margin = new Thickness(0, 0, 0, 3);
+            AutomationProperties.SetName(reminderSummary, "提醒时间预览"); reminderFields.Children.Add(reminderSummary);
+            useReminder.Checked += delegate { UpdateReminderFields(); };
+            useReminder.Unchecked += delegate { UpdateReminderFields(); };
+            foreach (ComboBox input in new[] { reminderDays, reminderHours, reminderMinutes, hour, minute }) {
+                input.SelectionChanged += delegate { UpdateReminderPreview(); };
+                input.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(delegate { UpdateReminderPreview(); }));
+            }
+            date.SelectedDateChanged += delegate { UpdateReminderPreview(); };
+            date.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(delegate { UpdateReminderPreview(); }));
+            UpdateReminderAvailability();
             useRecurrence = new CheckBox { Content = "重复任务", IsChecked = initialRecurrence != null,
                 Margin = new Thickness(0, 15, 0, 6), Visibility = allowRecurrence ? Visibility.Visible : Visibility.Collapsed,
                 IsEnabled = true };
@@ -263,6 +298,85 @@ namespace CornerTodo
             return Int32.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value <= maximum;
         }
 
+        private static ComboBox ReminderPart(int maximum, int selected, string name, bool padded)
+        {
+            var input = new ComboBox { Width = padded ? 52 : 62, IsEditable = true, IsTextSearchEnabled = false,
+                StaysOpenOnEdit = true, MaxDropDownHeight = 180, Padding = new Thickness(4, 5, 2, 5),
+                Background = Brushes.White, BorderBrush = Theme.Brush("#BDD0D8"), Foreground = Theme.Ink,
+                VerticalContentAlignment = VerticalAlignment.Center };
+            // Long day counts remain directly editable without creating thousands
+            // of visual dropdown items every time an editor is opened.
+            int regular = Math.Min(maximum, padded ? maximum : 31);
+            for (int value = 0; value <= regular; value++) input.Items.Add(value.ToString(padded ? "00" : "0", CultureInfo.InvariantCulture));
+            if (!padded) foreach (int value in new[] { 60, 90, 180, 365, 730, 1095, 1825, maximum })
+                if (value > regular && !input.Items.Contains(value.ToString(CultureInfo.InvariantCulture))) input.Items.Add(value.ToString(CultureInfo.InvariantCulture));
+            string selectedText = selected.ToString(padded ? "00" : "0", CultureInfo.InvariantCulture);
+            input.SelectedItem = selectedText; input.Text = selectedText;
+            input.ToolTip = "可点选或输入0–" + maximum.ToString(CultureInfo.InvariantCulture);
+            AutomationProperties.SetName(input, name); return input;
+        }
+
+        private static void AddReminderPart(Panel parent, ComboBox input, string unit)
+        {
+            var group = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 4) };
+            var label = Theme.Text(unit, 12, Theme.Ink); label.Margin = new Thickness(4, 0, 0, 0); label.VerticalAlignment = VerticalAlignment.Center;
+            group.Children.Add(input); group.Children.Add(label); parent.Children.Add(group);
+        }
+
+        private bool TryReminderLead(out int lead)
+        {
+            lead = 0; int days, hours, minutes;
+            if (!TryReminderPart(reminderDays, ReminderRules.MaxDays, out days) || !TryReminderPart(reminderHours, 23, out hours)
+                || !TryReminderPart(reminderMinutes, 59, out minutes)) return false;
+            lead = days * 1440 + hours * 60 + minutes;
+            return lead <= ReminderRules.MaxMinutes;
+        }
+
+        private static bool TryReminderPart(ComboBox input, int maximum, out int value)
+        {
+            value = 0; string text = input.Text.Trim();
+            if (text.Length == 0 || text.Length > 4) return false;
+            foreach (char character in text) if (character < '0' || character > '9') return false;
+            return Int32.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value <= maximum;
+        }
+
+        private void UpdateReminderAvailability()
+        {
+            if (useReminder == null || reminderFields == null) return;
+            bool available = useDeadline.IsChecked == true && useTime.IsChecked == true;
+            useReminder.IsEnabled = available;
+            useReminder.ToolTip = available ? "默认关闭，开启后可选择提前多久提醒。" : "请先设置截止日期和具体时刻。";
+            if (!available) useReminder.IsChecked = false;
+            reminderAvailability.Visibility = available ? Visibility.Collapsed : Visibility.Visible;
+            UpdateReminderFields();
+        }
+
+        private void UpdateReminderFields()
+        {
+            if (reminderFields == null) return;
+            reminderFields.Visibility = useReminder.IsChecked == true && useReminder.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+            UpdateReminderPreview(); UpdateEditorHeight();
+        }
+
+        private void UpdateReminderPreview()
+        {
+            if (reminderSummary == null || reminderFields.Visibility != Visibility.Visible) return;
+            int lead, selectedHour, selectedMinute; DateTime selected;
+            if (!TryReminderLead(out lead)) { reminderSummary.Text = "请填写有效的天数、小时数和分钟数。"; reminderSummary.Foreground = Theme.Warning; return; }
+            if (!DateTime.TryParse(date.Text, CultureInfo.GetCultureInfo("zh-CN"), DateTimeStyles.AllowWhiteSpaces, out selected)
+                || !TryTimePart(hour, 23, out selectedHour) || !TryTimePart(minute, 59, out selectedMinute)) {
+                reminderSummary.Text = "请先填写有效的截止日期和具体时刻。"; reminderSummary.Foreground = Theme.Warning; return;
+            }
+            DateTime due = selected.Date.AddHours(selectedHour).AddMinutes(selectedMinute);
+            DateTime? reminderAt = ReminderRules.GetReminderTime(new TodoItem { HasDeadline = true, HasTime = true, DueDate = due,
+                ReminderEnabled = true, ReminderMinutesBefore = lead });
+            if (!reminderAt.HasValue) { reminderSummary.Text = "提前时长超出可用日期范围，请减少。"; reminderSummary.Foreground = Theme.Warning; return; }
+            DateTime local = reminderAt.Value.Kind == DateTimeKind.Utc ? reminderAt.Value.ToLocalTime() : reminderAt.Value;
+            reminderSummary.Text = "将于" + local.ToString(local.Year == DateTime.Now.Year ? "M月d日 HH:mm" : "yyyy年M月d日 HH:mm", CultureInfo.InvariantCulture) + " 提醒"
+                + (local < DateTime.Now ? "；时间已过，保存后不补弹。" : "");
+            reminderSummary.Foreground = local < DateTime.Now ? Theme.Muted : Theme.Accent;
+        }
+
         private static RadioButton PriorityOption(string label, TaskPriority priority, Style style)
         {
             var option = new RadioButton { Content = label, Tag = priority, GroupName = "task-priority", Style = style,
@@ -290,12 +404,15 @@ namespace CornerTodo
             bool enabled = useDeadline.IsChecked == true;
             deadlineFields.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
             noDeadlineHint.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible;
+            UpdateReminderAvailability();
             UpdateEditorHeight();
         }
 
         private void UpdateEditorHeight()
         {
             double extra = useRecurrence != null && useRecurrence.IsChecked == true ? (recurrenceFrequency != null && recurrenceFrequency.SelectedIndex == 0 ? 118 : 172) : 0;
+            if (reminderFields != null && reminderFields.Visibility == Visibility.Visible) extra += 92;
+            if (reminderAvailability != null && reminderAvailability.Visibility == Visibility.Visible) extra += 18;
             Height = Math.Max(MinHeight, Math.Min(MaxHeight, fullEditorHeight - (useDeadline.IsChecked == true ? 0 : 85) + extra));
         }
 
@@ -383,7 +500,17 @@ namespace CornerTodo
                 if (hasDeadline && due.Date < start.Date)
                 { error.Text = "截止日期不能早于重复开始日期；也可取消设置截止日期。"; date.Focus(); return; }
             }
-            var draft = new TaskDraft { Text = text, HasDeadline = hasDeadline, DueDate = due, HasTime = hasTime, Notes = notes.Text, Priority = priority, Recurrence = recurrence };
+            bool reminderEnabled = hasTime && useReminder.IsChecked == true;
+            int reminderLead = 0;
+            if (reminderEnabled && !TryReminderLead(out reminderLead)) {
+                error.Text = "提醒提前时长无效：天数为0–3650，小时为00–23，分钟为00–59。"; reminderDays.Focus(); return;
+            }
+            if (reminderEnabled && !ReminderRules.GetReminderTime(new TodoItem { HasDeadline = true, HasTime = true, DueDate = due,
+                ReminderEnabled = true, ReminderMinutesBefore = reminderLead }).HasValue) {
+                error.Text = "提前时长超出可用日期范围，请减少。"; reminderDays.Focus(); return;
+            }
+            var draft = new TaskDraft { Text = text, HasDeadline = hasDeadline, DueDate = due, HasTime = hasTime, Notes = notes.Text, Priority = priority, Recurrence = recurrence,
+                ReminderEnabled = reminderEnabled, ReminderMinutesBefore = reminderEnabled ? reminderLead : 0 };
             // Keep the editable fields open until persistence succeeds, so a
             // transient disk failure cannot discard a long note or other input.
             if (saveDraft != null && !saveDraft(draft))

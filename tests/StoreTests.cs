@@ -280,7 +280,7 @@ internal static class StoreTests
             state.Settings.FloatingAutoExpand = floatingExpansion;
             store.Save(state);
             TodoState loaded = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
-            Assert(loaded.Version == 3 && loaded.Settings.AlwaysOnTop == floating && loaded.Settings.AutoExpand == desktopExpansion
+            Assert(loaded.Version == TodoState.CurrentVersion && loaded.Settings.AlwaysOnTop == floating && loaded.Settings.AutoExpand == desktopExpansion
                 && loaded.Settings.FloatingAutoExpand == floatingExpansion && loaded.Settings.EffectiveAutoExpand == (floating ? floatingExpansion : desktopExpansion),
                 "Restart lost a display preference or mixed the desktop and floating expansion switches.");
             Assert(loaded.Items.Single().Id == state.Items.Single().Id && loaded.Items.Single().DueDate == state.Items.Single().DueDate

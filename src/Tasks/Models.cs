@@ -26,6 +26,11 @@ namespace CornerTodo
         public string RecurringRuleId { get; set; }
         public DateTime? OccurrenceDate { get; set; }
         public string RepeatLabel { get; set; }
+        public bool ReminderEnabled { get; set; }
+        public int ReminderMinutesBefore { get; set; }
+        public string ReminderPlanId { get; set; }
+        public DateTime? ReminderSetAt { get; set; }
+        public DateTime? ReminderHandledAt { get; set; }
     }
 
     public sealed class WidgetSettings
@@ -59,7 +64,7 @@ namespace CornerTodo
 
     public sealed class TodoState
     {
-        public const int CurrentVersion = 3;
+        public const int CurrentVersion = 4;
 
         public TodoState()
         {

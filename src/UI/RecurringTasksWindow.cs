@@ -94,6 +94,7 @@ namespace CornerTodo
             string deadline = !rule.HasDeadline ? " · 未设截止" : " · 每期截止" + (rule.DeadlineOffsetDays == 0 ? "当天" : "顺延" + rule.DeadlineOffsetDays + "天") +
                 (rule.HasTime ? " " + TimeSpan.FromTicks(rule.DeadlineTimeTicks).ToString(@"hh\:mm", CultureInfo.InvariantCulture) : "");
             content.Children.Add(Theme.Text(RecurringTasks.Label(rule.Recurrence) + deadline, 12, Theme.Muted));
+            if (rule.ReminderEnabled) content.Children.Add(Theme.Text("提醒：" + ReminderRules.FormatLeadTime(rule.ReminderMinutesBefore) + " · 每期独立提醒", 11, Theme.Muted));
             DateTime? next = rule.IsPaused ? null : RecurringTasks.NextOccurrence(rule, now);
             string nextText = rule.IsPaused ? "恢复后继续按计划生成" : next.HasValue ? "下次生成：" + next.Value.ToString(next.Value.Year == now.Year ? "M月d日" : "yyyy年M月d日", CultureInfo.InvariantCulture) : "没有后续日期";
             content.Children.Add(Theme.Text(nextText, 12, Theme.Muted)); row.Children.Add(content);

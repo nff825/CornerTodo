@@ -32,7 +32,9 @@ namespace CornerTodo
                 Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsCompleted = item.IsCompleted,
                 CreatedAt = item.CreatedAt, CompletedAt = item.CompletedAt,
                 DueDate = item.DueDate, HasDeadline = item.HasDeadline, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt,
-                RecurringRuleId = item.RecurringRuleId, OccurrenceDate = item.OccurrenceDate, RepeatLabel = item.RepeatLabel
+                RecurringRuleId = item.RecurringRuleId, OccurrenceDate = item.OccurrenceDate, RepeatLabel = item.RepeatLabel,
+                ReminderEnabled = item.ReminderEnabled, ReminderMinutesBefore = item.ReminderMinutesBefore,
+                ReminderPlanId = item.ReminderPlanId, ReminderSetAt = item.ReminderSetAt, ReminderHandledAt = item.ReminderHandledAt
             };
         }
     }

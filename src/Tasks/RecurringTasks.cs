@@ -1,5 +1,7 @@
 using System;
 using System.Globalization;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace CornerTodo
 {
@@ -18,7 +20,7 @@ namespace CornerTodo
 
     public sealed class RecurringTaskRule
     {
-        public RecurringTaskRule() { Notes = ""; Priority = TaskPriority.Normal; Recurrence = new RecurrenceOptions(); }
+        public RecurringTaskRule() { Notes = ""; Priority = TaskPriority.Normal; Recurrence = new RecurrenceOptions(); PreparedOccurrences = new List<DateTime>(); }
         public string Id { get; set; }
         public string Text { get; set; }
         public string Notes { get; set; }
@@ -31,6 +33,12 @@ namespace CornerTodo
         public bool IsPaused { get; set; }
         public bool IsStopped { get; set; }
         public DateTime? ProcessedThrough { get; set; }
+        public bool ReminderEnabled { get; set; }
+        public int ReminderMinutesBefore { get; set; }
+        public DateTime? ReminderSetAt { get; set; }
+        // Tombstones for occurrences materialized before the calendar cursor reaches them.
+        // A deletion must not make the calendar generator recreate that period.
+        public List<DateTime> PreparedOccurrences { get; set; }
     }
 
     public sealed class RecurrenceSummary
@@ -60,7 +68,9 @@ namespace CornerTodo
                 Priority = source.Priority, HasDeadline = source.HasDeadline, HasTime = source.HasTime,
                 DeadlineOffsetDays = source.DeadlineOffsetDays, DeadlineTimeTicks = source.DeadlineTimeTicks,
                 Recurrence = Copy(source.Recurrence), IsPaused = source.IsPaused, IsStopped = source.IsStopped,
-                ProcessedThrough = source.ProcessedThrough };
+                ProcessedThrough = source.ProcessedThrough, ReminderEnabled = source.ReminderEnabled,
+                ReminderMinutesBefore = source.ReminderMinutesBefore, ReminderSetAt = source.ReminderSetAt,
+                PreparedOccurrences = source.PreparedOccurrences == null ? null : new List<DateTime>(source.PreparedOccurrences) };
         }
 
         public static void Validate(RecurrenceOptions options)
@@ -88,6 +98,13 @@ namespace CornerTodo
             if (rule.HasDeadline && rule.Recurrence.StartDate.Date > LatestDate(rule)) throw new ArgumentException("开始日期和截止间隔超出日期范围。");
             if (rule.ProcessedThrough.HasValue && (rule.ProcessedThrough.Value.TimeOfDay != TimeSpan.Zero || rule.ProcessedThrough.Value.Kind == DateTimeKind.Utc))
                 throw new ArgumentException("重复规则处理进度必须为本地日期。");
+            ReminderRules.ValidateRule(rule);
+            if (rule.PreparedOccurrences == null || rule.PreparedOccurrences.Count > 20000 || rule.PreparedOccurrences.Distinct().Count() != rule.PreparedOccurrences.Count)
+                throw new ArgumentException("提前生成的周期记录无效或过多。");
+            foreach (DateTime prepared in rule.PreparedOccurrences)
+                if (prepared == DateTime.MinValue || prepared.Kind == DateTimeKind.Utc || prepared.TimeOfDay != TimeSpan.Zero ||
+                    (rule.ProcessedThrough.HasValue && prepared <= rule.ProcessedThrough.Value))
+                    throw new ArgumentException("提前生成的周期记录必须为尚未被日历进度覆盖的本地日期。");
         }
 
         public static string Label(RecurrenceOptions options)

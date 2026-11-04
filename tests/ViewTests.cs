@@ -43,6 +43,7 @@ internal static class ViewTests
             Assert(application.Windows.Count == 0, "View tests unexpectedly created a Window.");
             TaskEditorTests.Run();
             RecurringUiTests.Run();
+            ReminderEditorTests.Run();
             Console.WriteLine("PASS: " + groups + " view behavior groups, " + checks + " checks.");
             Console.WriteLine("Real control trees and unshown editors; no Window.Show, store, session, Data or startup registration is used.");
             Console.WriteLine("Native double-click input still needs interactive verification; this test does not set nonpublic MouseButtonEventArgs state.");

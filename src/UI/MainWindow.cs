@@ -24,6 +24,7 @@ namespace CornerTodo
         private readonly DesktopAttachmentController desktopAttachment;
         private readonly DispatcherTimer saveTimer;
         private readonly DispatcherTimer refreshTimer;
+        private readonly ReminderController reminders;
         private bool menuOpen;
         private bool dialogOpen;
         private bool deferredRender;
@@ -40,6 +41,7 @@ namespace CornerTodo
         public event EventHandler HandleLost;
         internal TodoPanelView Panel { get { return panel; } }
         internal PanelController Interaction { get { return interaction; } }
+        internal ReminderController Reminders { get { return reminders; } }
 
         public MainWindow(TodoStore store, TodoState state, bool windowed, bool preview)
             : this(store, state, windowed, preview, null, null) { }
@@ -54,7 +56,7 @@ namespace CornerTodo
 
         internal MainWindow(TodoStore store, TodoSession session, bool windowed, bool preview,
             IStartupManager startupManager, IPanelHost panelHost, ApplicationInteraction applicationInteraction,
-            Func<DateTime> panelClock = null)
+            Func<DateTime> panelClock = null, IReminderPresenter reminderPresenter = null, IReminderTimer reminderTimer = null)
         {
             this.store = store; this.windowed = windowed; this.preview = preview;
             if (session == null) throw new ArgumentNullException("session");
@@ -108,6 +110,13 @@ namespace CornerTodo
             desktopAttachment = new DesktopAttachmentController(this, windowed, DesktopPendingChanged, delegate { return HostLost; });
             if (this.state.Settings.AlwaysOnTop) desktopAttachment.SetFloating(true);
             desktopAttachment.HandleLost += DesktopHandleLost;
+            reminders = new ReminderController(delegate { return session.ClaimDueReminders(); }, session.Snapshot,
+                delegate { return disposed || HostLost || menuOpen || dialogOpen || applicationInteraction.IsBusy; },
+                ReminderStateChanged, delegate(TodoItem item) { Edit(item); },
+                delegate(TodoItem item) { return Execute(delegate { session.SetCompleted(item.Id, true); }, "完成状态未保存。", true); },
+                delegate(Exception error) { Diagnostics.Log("Reminder delivery failed: " + error); ShowStatus("提醒暂未显示，可稍后重试。" + error.Message); },
+                reminderPresenter ?? new ReminderWindowPresenter(delegate { return DesktopHost.WorkArea(this); }, delegate { return DateTime.Now; }),
+                reminderTimer ?? new DispatcherReminderTimer(Dispatcher));
             Loaded += LoadedWindow;
             Closed += ClosedWindow;
             PreviewKeyDown += delegate(object sender, KeyEventArgs e) {
@@ -128,6 +137,7 @@ namespace CornerTodo
                 ShowModal(store.LoadWarning, "待办数据恢复", MessageBoxButton.OK, MessageBoxImage.Warning, MessageBoxResult.OK);
             }
             QueueRecurrenceCheck();
+            if (!preview) reminders.Start();
         }
 
         private void DesktopPendingChanged(bool pending)
@@ -141,6 +151,7 @@ namespace CornerTodo
         {
             EventHandler handler = HandleLost;
             if (handler != null) handler(this, EventArgs.Empty);
+            if (reminders != null) reminders.Refresh();
         }
 
         private void ClosedWindow(object sender, EventArgs e) { Dispose(); }
@@ -149,6 +160,7 @@ namespace CornerTodo
         {
             if (disposed) return;
             disposed = true;
+            reminders.Dispose();
             Loaded -= LoadedWindow; Closed -= ClosedWindow;
             desktopAttachment.HandleLost -= DesktopHandleLost;
             desktopAttachment.Dispose();
@@ -176,6 +188,15 @@ namespace CornerTodo
             panel.Render(state, now, preview, appearancePreview);
             Foreground = panel.Palette.Ink;
             UpdateExpansion(false, false);
+            if (reminders != null) reminders.Refresh();
+        }
+
+        private void ReminderStateChanged()
+        {
+            if (disposed || HostLost) return;
+            state = session.Snapshot(); deferredRender = true;
+            if (!InteractionBlocked) Render();
+            else { panel.UpdateHeader(state, DateTime.Now, preview); panel.UpdateTimes(DateTime.Now); }
         }
 
         private void ShowMenu()
@@ -424,6 +445,7 @@ namespace CornerTodo
             try {
                 var template = new TodoItem { Id = rule.Id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority,
                     HasDeadline = rule.HasDeadline, HasTime = rule.HasTime,
+                    ReminderEnabled = rule.ReminderEnabled, ReminderMinutesBefore = rule.ReminderMinutesBefore,
                     DueDate = rule.HasDeadline ? rule.Recurrence.StartDate.AddDays(rule.DeadlineOffsetDays).AddTicks(rule.DeadlineTimeTicks) : DateTime.MinValue };
                 TaskEditor editor = null; string saveError = null;
                 editor = new TaskEditor(template, false, delegate(TaskDraft draft) {
@@ -589,6 +611,7 @@ namespace CornerTodo
             catch (Exception ex) { ShowStatus(failureMessage + ex.Message); return false; }
             state = session.Snapshot();
             if (render) { panel.StatusText.Visibility = Visibility.Collapsed; Render(); }
+            else if (reminders != null) reminders.Refresh();
             return true;
         }
         private void ShowStatus(string text) { panel.StatusText.Text = text; panel.StatusText.Visibility = Visibility.Visible; panel.StatusText.ToolTip = text; }
@@ -617,6 +640,7 @@ namespace CornerTodo
             MessageBoxImage icon, MessageBoxResult defaultResult)
         {
             dialogOpen = true; interaction.StopAnimation();
+            if (reminders != null) reminders.Refresh();
             try {
                 using (applicationInteraction.EnterModal()) {
                     Window owner = activeDialog ?? this;
@@ -638,6 +662,7 @@ namespace CornerTodo
         private bool? ShowChildDialog(Window child)
         {
             PrepareChildWindow(child);
+            if (reminders != null) reminders.Refresh();
             Window previous = activeDialog;
             activeDialog = child;
             try { return child.ShowDialog(); }
@@ -646,7 +671,7 @@ namespace CornerTodo
 
         private void TrackMenu(ContextMenu menu)
         {
-            menu.Opened += delegate { menuOpen = true; interaction.StopAnimation(); RevealFromEdge(); };
+            menu.Opened += delegate { menuOpen = true; interaction.StopAnimation(); RevealFromEdge(); if (reminders != null) reminders.Refresh(); };
             menu.Closed += delegate { menuOpen = false; ResumeAttention(); };
         }
 
@@ -662,6 +687,7 @@ namespace CornerTodo
 
         private void ResumeAttention()
         {
+            if (reminders != null) reminders.CheckNow();
             if (disposed || !interaction.IsReady || HostLost || resumeQueued) return;
             resumeQueued = true;
             resumeOperation = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate {
