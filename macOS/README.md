@@ -1,69 +1,81 @@
-# CornerTodo for macOS · 实验性内测版
+# CornerTodo for macOS · v0.2.0-alpha.1 内测版
 
-版本：**0.1.0-alpha.1**。首批目标为 **macOS 14 或更新版本**，提供 Apple 芯片 ARM64 与 Intel x64 两种包。Windows 正式版本仍使用独立的版本号与发布目录。
+版本 **0.2.0-alpha.1**，构建号 **0.2.1**。目标 **macOS 14+**，分别提供 Apple 芯片 ARM64 和 Intel x64 自包含包；普通用户不需要安装 .NET、Python 或其他开发环境。Windows 与 Mac 独立编号。
 
-本工程参考 CornerBreak 的 .NET 10 / Avalonia 工程和打包方式，复用 CornerTodo 的任务、排序、截止时间、时间进度与尺寸计算规则。Mac 的界面、窗口层级、菜单栏及用户数据目录单独实现。
+本轮交付无截止日期、统一操作区和细滚动条，补充旧数据升级前备份、关于与反馈信息。保留任务完成／恢复、备注、优先级、排序、小时／分钟点选、外观设置与默认关闭的右侧贴边胶囊。
 
-## 验证边界
+## 下载与三分钟试用
 
-本版在 Windows 环境交叉构建。**Mac 启动、桌面层级、Spaces、全屏、多屏、睡眠唤醒和真实鼠标交互尚待 Mac 用户验收。** 生成包与通过共享规则测试不等于 Mac 实机可用。
-
-本版没有 Developer ID 发布者签名，也没有通过 Apple 公证。打包器检查 Mach-O 架构与代码页哈希、复制文件一致性、ZIP CRC 和 UNIX 执行权限；这些检查不代表 Apple 信任、Gatekeeper 或 Mac 启动验证。请作为实验性内测包试用，暂不按正式 Mac 版本宣传。
-
-## 下载与启动
-
-| 设备 | 选择文件 |
+| 设备 | 下载文件 |
 | --- | --- |
-| Apple M 系列芯片 | `CornerTodo-macos-v0.1.0-alpha.1-arm64-experimental.zip` |
-| Intel Mac | `CornerTodo-macos-v0.1.0-alpha.1-x64-experimental.zip` |
+| M1、M2 等 Apple M 系列 Mac | `CornerTodo-macos-v0.2.0-alpha.1-arm64-experimental.zip` |
+| Intel Mac | `CornerTodo-macos-v0.2.0-alpha.1-x64-experimental.zip` |
 
-1. 确认下载来自作者实际发布的地址，可使用随附 `SHA256SUMS.txt` 核对文件一致性。
-2. 完整解压后双击 **CornerTodo.app**。不要进入应用包内部单独移动可执行文件。
-3. 测试包自带运行环境，无需安装 .NET、SDK、Python 或其他开发工具。
-4. 菜单栏入口用于恢复面板和退出；退出前完成正在编辑的内容。
+1. 从作者实际分发的地址下载并完整解压，双击 **CornerTodo.app**。不要单独移动包内可执行文件。
+2. 添加一条有截止日期和一条无截止日期的测试事项，尝试编辑、取消、完成与恢复。
+3. 退出再打开，确认记录仍在；从菜单栏入口恢复面板并退出。
+4. 打开「关于 CornerTodo」核对版本／构建号，按 [内测清单](TESTING.md) 反馈结果。
 
-首次启动可能出现开发者身份提示。确认来源后，可参考 [Apple 官方说明](https://support.apple.com/en-us/102445) 决定是否允许此应用运行；如果提示已损坏、会损坏电脑，或启动即退出，请截图反馈设备与版本，不需要关闭系统防护或运行处理隔离属性的脚本。
+本包没有 Developer ID 发布者签名或 Apple 公证。首次打开若有身份提示，可根据来源与 [Apple 官方说明](https://support.apple.com/en-us/102445) 决定是否运行；若提示损坏、会损坏电脑或立即退出，请记录提示与设备信息。无需关闭系统防护或执行清除隔离属性、重新签名的脚本。
 
-## 本轮试用重点
+## 已支持的功能
 
-- 新增、编辑、删除、完成与恢复事项；截止日期及可选的小时／分钟点选。
-- 纯文字备注，高／中／低优先级，截止时间优先／优先级优先排序。
-- 约 3 DIP 的时间已用细条，到期满格，已完成事项保留划线并移入完成区域。
-- 半透明面板与独立文字颜色、浅色／深色外观；操作后保存或取消。
-- 右上角尺寸增长、默认关闭的右侧贴边胶囊；鼠标离开后收起，点击展开，编辑和菜单期间暂停自动变化。
-- 面板应能被其他软件遮住，并可通过菜单栏恢复。Mac 桌面层级与全屏行为是本轮重点验收项目。
+- 添加、编辑、删除、完成与恢复；已完成事项保留划线。
+- 截止日期可选，无日期显示「未设截止」，不显示时间条或贡献临期扩大。
+- 具体时刻按小时／分钟点选或输入；只有日期时到当天结束后才逾期。
+- 多行纯文字备注，高／中／低优先级，两种排序方式。
+- 时间已用细条、临期／逾期提示、按截止紧迫程度扩大。
+- 浅色、深色、自定义文字／背景与透明度；顶部与添加操作采用统一样式。
+- 简约滚动条保留足够的拖动范围；贴边胶囊保持可辨认底色。
+- 默认关闭的右侧贴边收起；编辑／菜单期间暂停自动收起，点击胶囊展开。
+- 菜单栏显示／恢复／退出，以及版本与反馈信息。
 
-这些行为的具体结果请按 [TESTING.md](TESTING.md) 记录。自动规则测试不替代 Mac 上的实际操作验收。原型不包含手机端、跨设备同步或 Mac 登录自启。
+## 当前范围与验证边界
 
-## 数据与更新
+**本版仍为实验性内测包。** Windows 上的共享测试、辅助 Avalonia 界面渲染和两架构交叉构建不代表 Mac 启动、真实鼠标、菜单栏、桌面层级、Spaces、全屏、Retina、多屏或休眠已验收。实际结果请按 [TESTING.md](TESTING.md) 记录。
 
-**开发分支兼容说明（Windows v1.8.0）：** 当前共享源码保存Version4的提醒计划、处理状态、重复规则和提前生成期次，也保留Windows悬浮显示偏好。Mac本轮仅做数据保留、测试和构建兼容，没有接入Mac提醒卡片／调度、悬浮模式或周期生成／管理界面。Mac编辑器修改其他内容时保留有效的Windows提醒配置；取消日期／具体时刻会关闭该事项提醒。读取旧1／2／3只在内存迁移。原已发布 `0.1.0-alpha.1` 包保持原样，不能读取v2／v3／v4；本次没有发布新的Mac包，也未完成Mac真机验收。
+当前没有接入 Mac 的重复任务设置／生成／管理、提醒卡片／调度或悬浮模式切换，也没有手机端、自动同步或 Mac 登录自启。导入的 Windows 重复、提醒与显示配置会保留，但不会在 Mac 上自动执行；程序会提示相关范围。修改已有事项时保留有效的提醒配置；取消日期或具体时刻会关闭该事项的提醒配置。
 
-数据与日志放在用户目录：
+## 数据、升级与回退
+
+数据与日志位于：
 
 ```text
 ~/Library/Application Support/CornerTodo/
 ```
 
-任务文件为 `todos.json`，不写进 `CornerTodo.app` 包内。替换应用前请退出并备份这个目录，替换应用后保留数据目录。
+任务文件是 `todos.json`，不写入 `CornerTodo.app`。替换应用前先退出并单独备份整个目录，替换应用后保留原数据目录；应用标识和数据路径保持不变。
 
-旧Windows v1.4.0与原Mac alpha.1使用Version1；当前开发分支使用Version4。v1.7.0及更早Windows和原Mac包无法读取v4，回退须恢复升级前另存的完整数据目录。共享源码的提醒计算测试不等于Mac会弹出提醒。两平台窗口位置需按各自屏幕重新确认，迁移先用备份副本验证，不让两个实例同时写同一目录。
+本版保存为 **Version 4**。检测到旧格式数据时，迁移前将数据目录复制为独立备份，放在：
 
-Windows 上辅助验证 Mac 前端时使用独立预览目录，不读取正式 Windows `dist/Data`。程序离线保存；当前没有自动跨设备同步。
+```text
+~/Library/Application Support/CornerTodo/UpgradeBackups/
+```
+
+备份不包含历史 `UpgradeBackups`，避免递归复制；备份失败时停止本次升级并保留旧文件。自动备份不能代替用户另存的完整备份。备份位置与具体提示以本版程序为准。
+
+旧 Mac `0.1.0-alpha.1` 不能读取新版数据。回退前先退出程序，将升级前备份中的数据恢复，再启动旧版。不要让新旧版本同时写入同一目录。手动跨平台迁移先在副本上验证；本工具没有自动同步。
+
+## 界面展示
+
+以下图片由实际 Avalonia 控件在 Windows 辅助环境渲染，使用合成事项，展示布局与配色，**不是 Mac 实机截图**。
+
+| 浅色长列表 | 深色长列表 |
+| :---: | :---: |
+| [<img src="images/panel-light.png" width="320" alt="Windows辅助Avalonia渲染：浅色统一操作区与细滚动条">](images/panel-light.png) | [<img src="images/panel-dark.png" width="320" alt="Windows辅助Avalonia渲染：深色统一操作区与细滚动条">](images/panel-dark.png) |
+
+[<img src="images/no-deadline-editor.png" width="360" alt="Windows辅助Avalonia渲染：不设置截止日期的事项编辑器">](images/no-deadline-editor.png)
+
+[查看长列表与滚动条示例](images/scroll-overflow.png)
 
 ## 维护者构建
 
-需要 .NET SDK 10.0.400 或后续可兼容功能带（本次验证使用 10.0.403）、PowerShell，以及 Python 3.9+。桌面依赖锁定 Avalonia 11.3.19，自包含运行时固定为 .NET 10.0.14。普通使用者不需要安装这些工具。
-
-从项目根目录执行：
+沿用现有 .NET 10／Avalonia 工程，依赖版本和运行时保持锁定。从项目根目录执行：
 
 ```powershell
 .\macOS\Build-Mac.ps1 -Architecture all -DotNetPath $dotnetPath -PythonPath $pythonPath
 ```
 
-两个变量应设置为本机可执行文件的完整路径。默认使用 `macOS/NuGet.Config`；离线源可通过 `-NuGetConfigPath` 指定。输出默认位于 `release/macos/v0.1.0-alpha.1`，中间产物及缓存位于 `output`；不会更新 Windows 的 `dist` 或旧发布包。
+变量应为 SDK 与 Python 的可执行文件路径。默认输出 `release/macos/v0.2.0-alpha.1/`，中间产物及缓存位于 `output`；不覆盖旧附件或 Windows 日常程序。详情见 [构建与分发](PUBLISHING.md)、[更新说明](RELEASE_NOTES.md)、[反馈模板](FEEDBACK.txt)。
 
-脚本从显式公开清单复制干净源码，运行共享测试，再生成两架构自包含应用、源码包、摘要与打包报告。重复构建不会覆盖已有同名附件；重新试验时用 `-OutputDirectory` 指定新的项目内目录。更多信息见 [PUBLISHING.md](PUBLISHING.md)。
-
-MIT 许可及第三方声明见根目录 `LICENSE`、[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
-
+MIT 及第三方声明见根目录 `LICENSE` 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

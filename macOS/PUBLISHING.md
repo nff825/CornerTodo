@@ -1,63 +1,56 @@
-# CornerTodo macOS · 构建与内测分发
+# CornerTodo macOS v0.2.0-alpha.1 · 构建与内测分发
 
-已发布 Mac 内测版本独立为 **0.1.0-alpha.1**；首轮 Mac 内测时 Windows 版本为1.4.0，当前 Windows 开发版本以根目录 VERSION 为准。两者分别维护发布目录，不覆盖已发布附件或标签。
+本版是独立的 **Mac 实验性内测**，构建号 **0.2.1**；Windows 版本号与发布包保持原样。首轮范围为无截止日期、新数据兼容、视觉统一、版本反馈和迁移前备份。重复任务、提醒调度与悬浮交互留待后续。
 
-开发分支说明（Windows v1.8.0）：共享规则与兼容测试支持Version4，保存提醒计划、处理记录、提前生成的重复期次及Windows显示偏好。Mac界面编辑其他内容时保留有效提醒字段，但未接入提醒调度／卡片、悬浮模式或周期生成／管理。本次不发布新Mac包；原 `macos-v0.1.0-alpha.1` 标签附件保持原样，不能读取v2／v3／v4。下一轮Mac发布须独立版本、重新打包并真机验收；验证源码使用独立output与合成数据。
+## 构建
 
-## 构建入口
-
-在项目根目录执行：
+从项目根目录执行：
 
 ```powershell
 .\macOS\Build-Mac.ps1 -Architecture all -DotNetPath $dotnetPath -PythonPath $pythonPath
 ```
 
-使用参数：
-
-| 参数 | 用途 |
-| --- | --- |
-| Architecture | all、arm64或x64；all生成两架构 |
-| DotNetPath | .NET SDK主程序完整路径 |
-| PythonPath | Python 3.9+完整路径 |
-| NuGetConfigPath | 默认macOS/NuGet.Config；可传本地离线源配置 |
-| ToolingDirectory | CLI与NuGet缓存，默认output/macOS/tooling |
-| OutputDirectory | 默认release/macos/v0.1.0-alpha.1，必须在本项目内 |
-
-输出目录中已有同名包时，脚本拒绝覆盖；可指定新的输出目录重新验证。中间文件保留在 `output/macOS/build-*`，便于检查；不把它们加入源码仓库或分发。
-
-构建会从 `Packaging/source-files.json` 的显式清单复制干净源码，在副本中编译并运行共享规则／数据测试，再自包含发布ARM64/x64，封装.app、检查架构／代码页哈希、ZIP CRC与执行权限。失败时不把半成品替换到发布目录。源码包只包含Mac构建必要的工程、共享源码、测试、文档和许可，不是Windows工程的完整替代品。
-
-## 产物
-
-默认目录为：
+SDK／Python 参数填写完整可执行文件路径；`NuGetConfigPath` 可指定已有离线源，`ToolingDirectory` 必须在本项目 `output` 内。默认输出：
 
 ```text
-release/macos/v0.1.0-alpha.1/
+release/macos/v0.2.0-alpha.1/
 ```
 
-- `CornerTodo-macos-v0.1.0-alpha.1-arm64-experimental.zip`
-- `CornerTodo-macos-v0.1.0-alpha.1-x64-experimental.zip`
-- `CornerTodo-macos-v0.1.0-alpha.1-source.zip`
-- 各包的manifest和单独SHA256，以及合并的`SHA256SUMS.txt`
-- `PACKAGE-REPORT.txt`
+脚本在干净源码副本中测试、发布两架构自包含运行时、构造.app、检查清单与逐文件摘要。现有输出拒绝覆盖，失败不替换已发布文件。静态 Mach-O／执行权限检查不等于 Mac 启动、Developer ID 签名、Gatekeeper 或 Apple 公证通过。
 
-便携包包含CornerTodo.app和测试说明，许可及第三方通知位于应用包内。源码展开目录可用于核对或重新构建。源码ZIP来自同一次干净构建副本，清单和逐文件摘要均可检查。
+版本来源需一致：`macOS/VERSION`、两个工程的版本、Program.Version；Program.BuildNumber、Desktop FileVersion 和 Info.plist 的内部构建号对应 **0.2.1**。独立构建号随测试版本递增，避免不同 alpha 在 Finder 中无法区分；不要复用其他版本的构建号。
 
-界面与菜单栏使用本项目自有图标导出的PNG资源。打包时也保留一份 `CornerTodo.app/Contents/Resources/CornerTodo.png`，原始ICO保留在源码包中；本轮没有生成或声明Finder专用的ICNS图标。
+## 附件
 
-## 内测前核对
+- `CornerTodo-macos-v0.2.0-alpha.1-arm64-experimental.zip`：M1等Apple芯片Mac用户。
+- `CornerTodo-macos-v0.2.0-alpha.1-x64-experimental.zip`：Intel Mac用户。
+- `CornerTodo-macos-v0.2.0-alpha.1-source.zip`：维护者源码，普通用户不需要。
+- `SHA256SUMS.txt`：三个压缩包的摘要。
+- `PACKAGE-REPORT.txt`、各架构manifest和单独摘要：维护者验证记录。
 
-1. 检查PACKAGE-REPORT和构建日志，确认共享测试与两种架构打包均成功。
-2. 检查manifest中的Mac实机标记保持实际结果；未验证时必须为false。
-3. 确认包中不含个人Data、日志、本地离线源路径、开发缓存或Windows发布包。
-4. 告知测试者系统范围、芯片选择、自包含运行环境，以及未Developer ID签名、未Apple公证、尚待真机验收。
-5. 先按TESTING.md小范围测试，收集启动、桌面层级、时间选择、贴边、全屏和退出反馈。
+每个程序ZIP包含 CornerTodo.app 和测试说明。应用内带运行时、许可证与第三方声明，不带个人Data。PNG资源不声明为ICNS原生图标。
 
-静态Mach-O代码页哈希通过，不代表Developer ID签名、Apple信任、Gatekeeper、资源封装签名或Mac启动通过。不要把Windows辅助测试写成Mac实机验收，不提供修改系统全局安全设置的处理脚本。
+## 内测交付前核对
 
-## GitHub 分发
+1. 检查两架构打包、共享核心测试、Mac迁移备份测试、辅助界面检查与包校验。
+2. 检查 manifest 中版本／构建号／架构正确，原生Mac启动、Developer ID与公证状态保持真实结果。
+3. 确认源码来自同一次干净构建，无本地缓存、测试数据、私人路径配置或Windows程序包。
+4. 核对旧Mac数据的升级备份与回退说明；保存为Version4后原alpha.1不可读。
+5. 按 [TESTING.md](TESTING.md) 找Mac用户试用。先拿Apple芯片结果，Intel另行标注实测状态。Windows辅助渲染不能算Mac真机验收。
 
-获得维护者明确发布授权后，可在现有仓库新增Mac内测Release，例如标签`macos-v0.1.0-alpha.1`，勾选pre-release，并避免将其设为替代Windows正式版的latest。正文需写明实验性质、系统版本和测试范围，再上传两个架构ZIP、Mac源码ZIP与SHA256SUMS。
+## GitHub 内测 Release
 
-本地构建脚本不会创建仓库、上传文件或发布Release。尚未完成Mac用户验收时，不应称为Mac正式稳定版。
+维护者完成上传时使用：
 
+- 标签：`macos-v0.2.0-alpha.1`
+- 标题：`CornerTodo macOS v0.2.0-alpha.1｜无截止日期与视觉优化内测`
+- 正文：[RELEASE_NOTES.md](RELEASE_NOTES.md)
+- 勾选 **This is a pre-release**，保持Windows正式版为Latest。
+- 上传两个架构程序ZIP、Mac源码ZIP和SHA256SUMS，等待附件完成后核对。
+- 保留原 `macos-v0.1.0-alpha.1` 的标签和附件。
+
+本地构建不会上传或创建GitHub Release。小范围测试者只需要对应芯片的程序ZIP、测试说明和反馈模板。完整Mac源码包不替代仓库内Windows完整工程，不将Mac精简源码目录覆盖仓库根目录。
+
+## 后续
+
+收集首次启动、保存、找回、退出和窗口行为结果后再扩展功能。面向更多用户分发时，另行安排Mac环境中的Developer ID签名与Apple公证。

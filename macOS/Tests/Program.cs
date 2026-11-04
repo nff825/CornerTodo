@@ -46,6 +46,8 @@ namespace CornerTodo.MacTests
                 Check(GrowthLayoutTests.Main(), "shared growth layout");
                 SerializerContract();
                 Paths(owned);
+                UpgradeBackups(owned);
+                UnsupportedFeatureNotice();
                 WindowsGoldenFixture(owned);
                 WindowsNoDeadlineFixture(owned);
                 WindowsRecurringFixture(owned);
@@ -366,6 +368,126 @@ namespace CornerTodo.MacTests
                     !settings.TryGetProperty("EffectiveAutoExpand", out _),
                     "The Mac serializer omitted display settings or persisted a derived effective setting.");
             }
+        }
+
+        private static void UpgradeBackups(string output)
+        {
+            string empty = Path.Combine(output, "upgrade-missing");
+            Assert(MacUpgradeBackup.CreateBeforeLoad(empty) == null && !Directory.Exists(empty), "A fresh profile unexpectedly wrote an upgrade backup.");
+            string rootFile = Path.Combine(output, "upgrade-root-file"); File.WriteAllText(rootFile, "occupied data path", new UTF8Encoding(false));
+            Throws<IOException>(delegate { MacUpgradeBackup.CreateBeforeLoad(rootFile); }, "A file occupying the data-directory path was silently accepted.");
+            Assert(File.ReadAllText(rootFile, Encoding.UTF8) == "occupied data path", "Rejecting an occupied data-directory path changed its bytes.");
+            string fixture = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "windows-v1.4.0.json"), Encoding.UTF8);
+            string root = Path.Combine(output, "upgrade-complete"); Directory.CreateDirectory(root);
+            var utf8 = new UTF8Encoding(false);
+            string source = Path.Combine(root, "todos.json");
+            File.WriteAllText(source, fixture, utf8); File.WriteAllText(source + ".bak", "previous raw generation", utf8);
+            string extra = Path.Combine(root, "extra"); Directory.CreateDirectory(extra); Directory.CreateDirectory(Path.Combine(extra, "empty"));
+            byte[] binary = Enumerable.Range(0, 256).Select(value => (byte)value).ToArray();
+            File.WriteAllBytes(Path.Combine(extra, "original.bin"), binary);
+            File.WriteAllText(Path.Combine(root, "BACKUP-MANIFEST.json"), "a user's original metadata", utf8);
+            string older = Path.Combine(root, MacUpgradeBackup.DirectoryName, "older"); Directory.CreateDirectory(older);
+            File.WriteAllText(Path.Combine(older, "sentinel.txt"), "not nested", utf8);
+            byte[] original = File.ReadAllBytes(source);
+            string saved = MacUpgradeBackup.CreateBeforeLoad(root);
+            Assert(saved != null && saved.StartsWith(Path.Combine(root, MacUpgradeBackup.DirectoryName) + Path.DirectorySeparatorChar, StringComparison.Ordinal), "Backup escaped its selected profile.");
+            Assert(File.ReadAllBytes(source).SequenceEqual(original) && File.ReadAllBytes(Path.Combine(saved, "todos.json")).SequenceEqual(original), "Backup rewrote or reserialized the original tasks.");
+            Assert(File.ReadAllText(Path.Combine(saved, "todos.json.bak"), Encoding.UTF8) == "previous raw generation", "Backup omitted the previous raw backup.");
+            Assert(File.ReadAllBytes(Path.Combine(saved, "extra", "original.bin")).SequenceEqual(binary) && Directory.Exists(Path.Combine(saved, "extra", "empty")), "Backup lost nested files or empty directories.");
+            Assert(!Directory.Exists(Path.Combine(saved, MacUpgradeBackup.DirectoryName)) && File.ReadAllText(Path.Combine(older, "sentinel.txt")) == "not nested", "Backup recursed into old upgrade backups.");
+            Assert(File.ReadAllText(Path.Combine(saved, "BACKUP-MANIFEST.json")) == "a user's original metadata" && Directory.GetFiles(saved, "BACKUP-MANIFEST*.json").Length == 2,
+                "Backup manifest overwrote a same-named user file.");
+            var store = new TodoStore(root); var loaded = store.Load();
+            Assert(loaded.Version == TodoState.CurrentVersion && loaded.Items.Count == 2 && File.ReadAllBytes(source).SequenceEqual(original), "Legacy reading unexpectedly changed original bytes.");
+            store.Save(loaded);
+            Assert(!File.ReadAllBytes(source).SequenceEqual(original) && File.ReadAllBytes(Path.Combine(saved, "todos.json")).SequenceEqual(original), "First upgraded save altered the independent upgrade backup.");
+            int count = Directory.GetDirectories(Path.Combine(root, MacUpgradeBackup.DirectoryName)).Length;
+            Assert(MacUpgradeBackup.CreateBeforeLoad(root) != null, "A current primary with an older recovery generation was not protected.");
+            store.Save(loaded);
+            count = Directory.GetDirectories(Path.Combine(root, MacUpgradeBackup.DirectoryName)).Length;
+            Assert(MacUpgradeBackup.CreateBeforeLoad(root) == null && Directory.GetDirectories(Path.Combine(root, MacUpgradeBackup.DirectoryName)).Length == count,
+                "Two current-schema generations created another unnecessary backup.");
+
+            foreach (int version in new[] { 2, 3 })
+            {
+                string old = Path.Combine(output, "upgrade-schema-" + version); Directory.CreateDirectory(old);
+                string json = fixture.Replace("\"Version\": 1", "\"Version\": " + version).Replace("\"Version\":1", "\"Version\":" + version);
+                File.WriteAllText(Path.Combine(old, "todos.json"), json, utf8);
+                string backup = MacUpgradeBackup.CreateBeforeLoad(old);
+                Assert(backup != null && File.ReadAllText(Path.Combine(backup, "todos.json"), Encoding.UTF8) == json, "An older schema was not backed up byte-for-byte.");
+            }
+            string fallback = Path.Combine(output, "upgrade-backup-only"); Directory.CreateDirectory(fallback);
+            File.WriteAllText(Path.Combine(fallback, "todos.json.bak"), fixture, utf8);
+            string recoveredBackup = MacUpgradeBackup.CreateBeforeLoad(fallback);
+            Assert(recoveredBackup != null && !File.Exists(Path.Combine(fallback, "todos.json")), "Missing-primary preparation recovered data before backup completed.");
+            Assert(new TodoStore(fallback).Load().Items.Count == 2 && File.ReadAllText(Path.Combine(recoveredBackup, "todos.json.bak"), Encoding.UTF8) == fixture,
+                "Recovery did not retain the independent original backup.");
+
+            string semantic = Path.Combine(output, "upgrade-current-invalid-legacy-backup"); Directory.CreateDirectory(semantic);
+            string semanticJson = "{\"Version\":" + TodoState.CurrentVersion + ",\"Items\":\"invalid\"}";
+            File.WriteAllText(Path.Combine(semantic, "todos.json"), semanticJson, utf8);
+            File.WriteAllText(Path.Combine(semantic, "todos.json.bak"), fixture, utf8);
+            string semanticBackup = MacUpgradeBackup.CreateBeforeLoad(semantic);
+            Assert(semanticBackup != null && File.ReadAllText(Path.Combine(semanticBackup, "todos.json")) == semanticJson
+                && File.ReadAllText(Path.Combine(semanticBackup, "todos.json.bak"), Encoding.UTF8) == fixture,
+                "A semantic failure in a current primary escaped the pre-recovery legacy backup.");
+            Assert(new TodoStore(semantic).Load().Items.Count == 2
+                && File.ReadAllText(Path.Combine(semanticBackup, "todos.json.bak"), Encoding.UTF8) == fixture,
+                "Migrating a legacy recovery generation changed the independent old bytes.");
+
+            string broken = Path.Combine(output, "upgrade-corrupt"); Directory.CreateDirectory(broken);
+            File.WriteAllText(Path.Combine(broken, "todos.json"), "{\"Version\":1,", utf8);
+            string brokenBackup = MacUpgradeBackup.CreateBeforeLoad(broken);
+            Assert(File.ReadAllText(Path.Combine(brokenBackup, "todos.json")) == "{\"Version\":1,", "Malformed original data was lost before shared recovery.");
+
+            string future = Path.Combine(output, "upgrade-future"); Directory.CreateDirectory(future);
+            string futureJson = "{\"Version\":999,\"Items\":[]}"; File.WriteAllText(Path.Combine(future, "todos.json"), futureJson, utf8);
+            File.WriteAllText(Path.Combine(future, "todos.json.bak"), fixture, utf8);
+            Assert(MacUpgradeBackup.CreateBeforeLoad(future) == null && !Directory.Exists(Path.Combine(future, MacUpgradeBackup.DirectoryName)), "A future schema was mistaken for an old format.");
+            Throws<NotSupportedException>(delegate { new TodoStore(future).Load(); }, "Future data no longer produces an explicit unsupported-version error.");
+            Assert(File.ReadAllText(Path.Combine(future, "todos.json")) == futureJson, "Unsupported future data was overwritten.");
+
+            string blocked = Path.Combine(output, "upgrade-blocked"); Directory.CreateDirectory(blocked);
+            File.WriteAllText(Path.Combine(blocked, "todos.json"), fixture, utf8);
+            File.WriteAllText(Path.Combine(blocked, MacUpgradeBackup.DirectoryName), "occupied", utf8);
+            Throws<IOException>(delegate { MacUpgradeBackup.CreateBeforeLoad(blocked); }, "A failed backup destination was silently accepted.");
+            Assert(File.ReadAllText(Path.Combine(blocked, "todos.json"), Encoding.UTF8) == fixture && !File.Exists(Path.Combine(blocked, "todos.json.bak")), "A failed backup changed or upgraded the original data.");
+
+            string locked = Path.Combine(output, "upgrade-locked"); Directory.CreateDirectory(locked);
+            string lockedFile = Path.Combine(locked, "todos.json"); File.WriteAllText(lockedFile, fixture, utf8);
+            using (new FileStream(lockedFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Throws<IOException>(delegate { MacUpgradeBackup.CreateBeforeLoad(locked); }, "A locked original was read without a safe snapshot.");
+            Assert(File.ReadAllText(lockedFile, Encoding.UTF8) == fixture && !Directory.Exists(Path.Combine(locked, MacUpgradeBackup.DirectoryName)), "Locked backup failure altered the original profile.");
+
+            string linked = Path.Combine(output, "upgrade-linked"); Directory.CreateDirectory(linked);
+            File.WriteAllText(Path.Combine(linked, "todos.json"), fixture, utf8);
+            string target = Path.Combine(output, "link-target"); Directory.CreateDirectory(target);
+            File.WriteAllText(Path.Combine(target, "outside.txt"), "outside", utf8);
+            bool created = false;
+            try { Directory.CreateSymbolicLink(Path.Combine(linked, "external"), target); created = true; }
+            catch (UnauthorizedAccessException) { Console.WriteLine("SKIP: creating a symbolic-link fixture is not permitted on this host."); }
+            catch (IOException) { Console.WriteLine("SKIP: creating a symbolic-link fixture is not supported on this host."); }
+            if (created) {
+                Throws<IOException>(delegate { MacUpgradeBackup.CreateBeforeLoad(linked); }, "A backup followed a symbolic link outside the profile.");
+                Assert(!Directory.Exists(Path.Combine(linked, MacUpgradeBackup.DirectoryName)) && File.ReadAllText(Path.Combine(target, "outside.txt")) == "outside", "Rejected symbolic link mutated an external target.");
+                string missingTarget = Path.Combine(output, "missing-link-target"), danglingRoot = Path.Combine(output, "upgrade-dangling-root");
+                Directory.CreateSymbolicLink(danglingRoot, missingTarget);
+                Throws<IOException>(delegate { MacUpgradeBackup.CreateBeforeLoad(danglingRoot); }, "A dangling data-root link bypassed the pre-load guard.");
+                Assert(!Directory.Exists(missingTarget), "Rejecting a dangling data root created its external target.");
+            }
+        }
+
+        private static void UnsupportedFeatureNotice()
+        {
+            var state = new TodoState();
+            Assert(MacCompatibilityNotice.ForState(state) == "", "A fresh Mac profile falsely reported unsupported imported features.");
+            state.Settings.AlwaysOnTop = true;
+            string floating = MacCompatibilityNotice.ForState(state);
+            Assert(floating.Contains("Windows 悬浮") && state.Settings.AlwaysOnTop, "A compatibility notice cleared a preserved Windows display preference.");
+            state.RecurringRules.Add(new RecurringTaskRule { Id = "notice-rule", ReminderEnabled = true });
+            string before = JsonSerializer.Serialize(state), notice = MacCompatibilityNotice.ForState(state);
+            Assert(notice.Contains("重复规则") && notice.Contains("提醒配置") && notice.Contains("暂不执行") && JsonSerializer.Serialize(state) == before,
+                "Unsupported-feature reporting implied execution or mutated imported settings.");
         }
 
         private static void LegacyDatesAndLiteralNotes(string output)

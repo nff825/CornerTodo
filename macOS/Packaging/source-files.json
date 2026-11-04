@@ -26,6 +26,8 @@
   "macOS/Core/CornerTodo.MacCore.csproj",
   "macOS/Core/AssemblyInfo.cs",
   "macOS/Core/AppPaths.cs",
+  "macOS/Core/MacUpgradeBackup.cs",
+  "macOS/Core/MacCompatibilityNotice.cs",
   "macOS/Core/LegacyJsonSerializerAdapter.cs",
   "macOS/Core/packages.lock.json",
   "macOS/Tests/CornerTodo.MacTests.csproj",
@@ -59,5 +61,11 @@
   "macOS/ThirdPartyLicenses/SkiaSharp-LICENSE.txt",
   "macOS/ThirdPartyLicenses/SkiaSharp-THIRD-PARTY-NOTICES.txt",
   "macOS/ThirdPartyLicenses/Tmds.DBus.Protocol-LICENSE.txt",
-  "macOS/ThirdPartyLicenses/manifest.json"
+  "macOS/ThirdPartyLicenses/manifest.json",
+  "macOS/RELEASE_NOTES.md",
+  "macOS/FEEDBACK.txt",
+  "macOS/images/panel-light.png",
+  "macOS/images/panel-dark.png",
+  "macOS/images/no-deadline-editor.png",
+  "macOS/images/scroll-overflow.png"
 ]

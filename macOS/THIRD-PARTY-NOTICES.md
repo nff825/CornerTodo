@@ -1,4 +1,4 @@
-# Third-party notices · CornerTodo macOS 0.1.0-alpha.1
+# Third-party notices · CornerTodo macOS
 
 本测试包包含以下第三方运行时组件。版本依据 `Desktop/packages.lock.json` 与实际自包含发布输出整理。许可原文保存在同目录的 `ThirdPartyLicenses` 文件夹；来源和 SHA256 见 [manifest.json](ThirdPartyLicenses/manifest.json)。
 

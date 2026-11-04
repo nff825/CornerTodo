@@ -6,6 +6,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -33,6 +34,7 @@ public sealed class TodoWindow : Window
     private readonly DispatcherTimer timer;
     private AppearanceSettings? appearancePreview;
     private AppearanceSettings palette = AppearanceSettings.CreateLight();
+    private Ui.ActionPalette actions = new(AppearanceSettings.CreateLight());
     private IBrush ink = Ui.Ink, muted = Ui.Muted, accent = Ui.Accent, warning = Ui.Warning, urgent = Brush.Parse("#98651D");
     private bool ready, stopped, pointerInside, moving, resizing, edgeHidden, docked, hideArmed, waitsForEntry;
     private int dialogs, menus;
@@ -77,11 +79,12 @@ public sealed class TodoWindow : Window
         more = Ui.Button("⋯", ShowMenu); more.Width = 34; more.Height = 32; more.Padding = new Thickness(4);
         AutomationProperties.SetName(collapse, "收起面板"); AutomationProperties.SetName(more, "更多操作");
         ToolTip.SetTip(more, "更多操作"); toolbar.Children.Add(collapse); toolbar.Children.Add(more);
-        toolbarSurface = new Border { Child = toolbar, Background = Brush.Parse("#F4F9FB"), CornerRadius = new CornerRadius(6) };
+        toolbarSurface = new Border { Child = toolbar, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Top };
         Grid.SetColumn(toolbarSurface, 1); header.Children.Add(toolbarSurface); root.Children.Add(header);
         rows = new StackPanel { Spacing = 11, Margin = new Thickness(0, 0, 12, 0) };
         scroll = new ScrollViewer { Content = rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Ui.StylePanelScroll(scroll); AutomationProperties.SetName(scroll, "待办事项列表");
         Grid.SetRow(scroll, 1); root.Children.Add(scroll);
         footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 8, 0, 0) };
         add = Ui.Button("＋ 添加待办", () => Edit(null)); add.HorizontalAlignment = HorizontalAlignment.Left; footer.Children.Add(add);
@@ -212,10 +215,13 @@ public sealed class TodoWindow : Window
         state = session.Snapshot(); palette = AppearanceSettings.Normalize(appearancePreview ?? state.Settings.Appearance);
         ink = Brush.Parse(palette.PrimaryTextColor); muted = Brush.Parse(palette.SecondaryTextColor);
         bool dark = Color.Parse(palette.BackgroundColor) is var bg && .2126 * bg.R + .7152 * bg.G + .0722 * bg.B < 127.5;
+        RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
         accent = Brush.Parse(dark ? "#79D2E5" : "#2B8196"); warning = Brush.Parse(dark ? "#FFB4AB" : "#A1463C"); urgent = Brush.Parse(dark ? "#F6CA75" : "#98651D");
         title.Foreground = ink; date.Foreground = muted; attention.Foreground = muted; status.Foreground = warning;
-        toolbarSurface.Background = Brush.Parse(dark ? "#F4182B38" : "#F4F4F9FB");
-        collapse.Foreground = more.Foreground = add.Foreground = accent;
+        actions = new Ui.ActionPalette(palette);
+        toolbarSurface.Background = actions.Fill; toolbarSurface.BorderBrush = actions.Outline;
+        Ui.ApplyPanelAction(collapse, actions, false); Ui.ApplyPanelAction(more, actions, false); Ui.ApplyPanelAction(add, actions, true);
+        scroll.Foreground = muted;
         var previousScroll = scroll.Offset;
         rows.Children.Clear(); taskRows.Clear();
         var pending = TodoRules.Pending(state).ToList(); var completed = TodoRules.Completed(state).ToList();
@@ -337,7 +343,7 @@ public sealed class TodoWindow : Window
     {
         var color = Color.Parse(palette.BackgroundColor);
         surface.Background = edgeHidden
-            ? new SolidColorBrush(Color.FromArgb(244, color.R, color.G, color.B))
+            ? actions.Capsule
             : new SolidColorBrush(Color.FromArgb((byte)Math.Round(255 * (1 - palette.BackgroundTransparency / 100)), color.R, color.G, color.B));
         surface.Padding = edgeHidden ? new Thickness(3, 4) : state.Settings.Collapsed ? new Thickness(19, 10, 17, 8) : new Thickness(19, 15, 17, 12);
         surface.CornerRadius = edgeHidden ? new CornerRadius(16, 0, 0, 16) : new CornerRadius(12);
@@ -569,6 +575,14 @@ public sealed class TodoWindow : Window
         if (stopped) return;
         if (!ready) InitializeGeometry();
         OnTick(null, EventArgs.Empty);
+    }
+
+    internal async Task ShowAuxiliaryDialog(Window dialog)
+    {
+        if (IsBusy || stopped) return;
+        dialogs++; animating = false; RevealEdge();
+        try { Ui.FitDialog(dialog, this); await dialog.ShowDialog(this); }
+        finally { dialogs--; hideAt = null; }
     }
 
     private async void ShowHelp()

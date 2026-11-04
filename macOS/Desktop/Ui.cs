@@ -5,6 +5,8 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Templates;
+using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -53,6 +55,107 @@ internal static class Ui
         window.Styles.Add(new Style(x => x.OfType<Button>().Class("primary").Class(":pointerover").Template().OfType<ContentPresenter>().Name("PART_ContentPresenter"))
         { Setters = { new Setter(ContentPresenter.BackgroundProperty, Brush.Parse("#1D6878")), new Setter(ContentPresenter.ForegroundProperty, Brushes.White) } });
     }
+
+    /// <summary>Panel-only action surfaces. Editor and native menu controls retain their own styles.</summary>
+    internal sealed class ActionPalette
+    {
+        internal IBrush Fill { get; }
+        internal IBrush Outline { get; }
+        internal IBrush Hover { get; }
+        internal IBrush Pressed { get; }
+        internal IBrush Capsule { get; }
+        internal IBrush Foreground { get; }
+        internal ActionPalette(AppearanceSettings appearance)
+        {
+            var value = AppearanceSettings.Normalize(appearance);
+            Color background = Color.Parse(value.BackgroundColor), muted = Color.Parse(value.SecondaryTextColor);
+            bool dark = .2126 * background.R + .7152 * background.G + .0722 * background.B < 127.5;
+            Color accent = Color.Parse(dark ? "#79D2E5" : "#2B8196");
+            Color fill = Mix(background, muted, .18);
+            byte alpha = (byte)Math.Max(180, Math.Round(255 * (1 - value.BackgroundTransparency / 100) * .8));
+            Fill = WithAlpha(fill, alpha); Outline = WithAlpha(muted, 75);
+            Hover = WithAlpha(Mix(fill, accent, .12), alpha);
+            Pressed = WithAlpha(Mix(fill, accent, .22), alpha);
+            Capsule = WithAlpha(fill, 244); Foreground = new SolidColorBrush(accent);
+        }
+    }
+
+    internal static void ApplyPanelAction(Button button, ActionPalette palette, bool filled)
+    {
+        button.Background = filled ? palette.Fill : Brushes.Transparent;
+        button.Foreground = palette.Foreground;
+        button.BorderBrush = filled ? palette.Outline : Brushes.Transparent;
+        button.BorderThickness = new Thickness(filled ? 1 : 0);
+        button.Styles.Clear();
+        button.Template = new FuncControlTemplate<Button>((parent, scope) => {
+            var caption = new ContentPresenter { Name = "PART_ContentPresenter",
+                HorizontalContentAlignment = parent.HorizontalContentAlignment, VerticalContentAlignment = VerticalAlignment.Center };
+            scope.Register(caption.Name, caption);
+            caption.Bind(ContentPresenter.ContentProperty, new Binding(nameof(ContentControl.Content)) { Source = parent });
+            caption.Bind(ContentPresenter.ForegroundProperty, new Binding(nameof(Avalonia.Controls.Button.Foreground)) { Source = parent });
+            var surface = new Border { Name = "ActionSurface", CornerRadius = new CornerRadius(8), Child = caption };
+            scope.Register(surface.Name, surface);
+            surface.Bind(Border.BackgroundProperty, new Binding(nameof(Avalonia.Controls.Button.Background)) { Source = parent, Priority = BindingPriority.Template });
+            surface.Bind(Border.BorderBrushProperty, new Binding(nameof(Avalonia.Controls.Button.BorderBrush)) { Source = parent, Priority = BindingPriority.Template });
+            surface.Bind(Border.BorderThicknessProperty, new Binding(nameof(Avalonia.Controls.Button.BorderThickness)) { Source = parent, Priority = BindingPriority.Template });
+            surface.Bind(Border.PaddingProperty, new Binding(nameof(Avalonia.Controls.Button.Padding)) { Source = parent });
+            return surface;
+        });
+        button.Styles.Add(new Style(s => s.OfType<Button>().Class(":pointerover").Template().OfType<Border>().Name("ActionSurface"))
+        { Setters = { new Setter(Border.BackgroundProperty, filled ? palette.Hover : WithAlpha(((SolidColorBrush)palette.Foreground).Color, 40)) } });
+        button.Styles.Add(new Style(s => s.OfType<Button>().Class(":pressed").Template().OfType<Border>().Name("ActionSurface"))
+        { Setters = { new Setter(Border.BackgroundProperty, filled ? palette.Pressed : WithAlpha(((SolidColorBrush)palette.Foreground).Color, 65)) } });
+        button.Styles.Add(new Style(s => s.OfType<Button>().Class(":focus-visible").Template().OfType<Border>().Name("ActionSurface"))
+        { Setters = { new Setter(Border.BorderBrushProperty, palette.Foreground), new Setter(Border.BorderThicknessProperty, new Thickness(1)) } });
+    }
+
+    /// <summary>Retains the real Avalonia ScrollBar/Track mechanics and a 14-DIP drag target around a 5-DIP indicator.</summary>
+    internal static void StylePanelScroll(ScrollViewer viewer)
+    {
+        viewer.Styles.Add(new Style(s => s.OfType<ScrollBar>().Class(":vertical")) {
+            Setters = {
+                new Setter(ScrollBar.WidthProperty, 14d), new Setter(ScrollBar.MinWidthProperty, 14d),
+                new Setter(ScrollBar.MaxWidthProperty, 14d), new Setter(ScrollBar.AllowAutoHideProperty, false),
+                new Setter(ScrollBar.BackgroundProperty, Brushes.Transparent),
+                new Setter(ScrollBar.TemplateProperty, new FuncControlTemplate<ScrollBar>((bar, scope) => {
+                    var thumb = new Thumb { Name = "PART_Thumb", MinHeight = 24, Width = 14, Background = Brushes.Transparent };
+                    scope.Register(thumb.Name, thumb);
+                    thumb.Template = new FuncControlTemplate<Thumb>((_, thumbScope) => {
+                        var indicator = new Border { Name = "ScrollIndicator", Width = 5, CornerRadius = new CornerRadius(2.5),
+                            Margin = new Thickness(0, 2), HorizontalAlignment = HorizontalAlignment.Center };
+                        indicator.SetValue(Visual.OpacityProperty, .55, BindingPriority.Template);
+                        thumbScope.Register(indicator.Name, indicator);
+                        indicator.Bind(Border.BackgroundProperty, new Binding(nameof(ScrollViewer.Foreground)) { Source = viewer });
+                        var hit = new Grid { Background = Brushes.Transparent }; hit.Children.Add(indicator); return hit;
+                    });
+                    thumb.Styles.Add(new Style(s => s.OfType<Thumb>().Class(":pointerover").Template().OfType<Border>().Name("ScrollIndicator"))
+                    { Setters = { new Setter(Border.OpacityProperty, .85) } });
+                    thumb.Styles.Add(new Style(s => s.OfType<Thumb>().Class(":pressed").Template().OfType<Border>().Name("ScrollIndicator"))
+                    { Setters = { new Setter(Border.OpacityProperty, 1d) } });
+                    RepeatButton Page(string name) {
+                        var button = new RepeatButton { Name = name, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Focusable = false };
+                        scope.Register(name, button);
+                        button.Template = new FuncControlTemplate<RepeatButton>((_, _) => new Border { Background = Brushes.Transparent });
+                        return button;
+                    }
+                    var track = new Track { Name = "PART_Track", Orientation = Orientation.Vertical, IsDirectionReversed = true,
+                        Thumb = thumb, DecreaseButton = Page("PART_PageUpButton"), IncreaseButton = Page("PART_PageDownButton") };
+                    scope.Register(track.Name, track);
+                    track.Bind(Track.MinimumProperty, new Binding(nameof(ScrollBar.Minimum)) { Source = bar });
+                    track.Bind(Track.MaximumProperty, new Binding(nameof(ScrollBar.Maximum)) { Source = bar });
+                    track.Bind(Track.ViewportSizeProperty, new Binding(nameof(ScrollBar.ViewportSize)) { Source = bar });
+                    track.Bind(Track.ValueProperty, new Binding(nameof(ScrollBar.Value)) { Source = bar, Mode = BindingMode.TwoWay });
+                    return track;
+                }))
+            }
+        });
+    }
+
+    private static Color Mix(Color first, Color second, double amount) => Color.FromRgb(
+        (byte)Math.Round(first.R * (1 - amount) + second.R * amount),
+        (byte)Math.Round(first.G * (1 - amount) + second.G * amount),
+        (byte)Math.Round(first.B * (1 - amount) + second.B * amount));
+    private static SolidColorBrush WithAlpha(Color color, byte alpha) => new(Color.FromArgb(alpha, color.R, color.G, color.B));
 
     internal static PixelRect WorkArea(Window window)
     {

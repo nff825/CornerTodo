@@ -46,6 +46,22 @@ class BundleError(ValueError):
     pass
 
 
+def version_metadata(version: str, build_number: str | None) -> dict:
+    # The public alpha/beta label and the Apple numeric build serve different
+    # purposes. Require an explicit build rather than discard the pre-release
+    # suffix and silently give every alpha the same CFBundleVersion.
+    if not isinstance(version, str) or re.fullmatch(
+            r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?", version) is None:
+        raise BundleError("invalid version")
+    if not isinstance(build_number, str) or re.fullmatch(
+            r"(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d?)\.(?:0|[1-9]\d?)", build_number) is None:
+        raise BundleError("--build-number must be an explicit three-part Apple build number")
+    base = version.split("-", 1)[0]
+    if build_number.split(".")[:2] != base.split(".")[:2]:
+        raise BundleError("build number major/minor must match the public version")
+    return {"version": version, "bundleShortVersion": base, "buildNumber": build_number}
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -300,6 +316,17 @@ def inspect_publish(publish_dir: Path, arch: str) -> dict:
             "bundleResourceSealVerified": False}
 
 
+def verify_project_identity(publish_dir: Path, identity: dict) -> None:
+    dependencies = json.loads((publish_dir / (EXECUTABLE + ".deps.json")).read_text(encoding="utf-8-sig"))
+    libraries = dependencies.get("libraries") if isinstance(dependencies, dict) else None
+    expected = EXECUTABLE + "/" + identity["version"]
+    matches = [] if not isinstance(libraries, dict) else [
+        key for key, value in libraries.items()
+        if key.startswith(EXECUTABLE + "/") and isinstance(value, dict) and value.get("type") == "project"]
+    if matches != [expected]:
+        raise BundleError("published project version differs from the requested release version")
+
+
 def zip_entry(name: str, mode: int, directory: bool = False) -> zipfile.ZipInfo:
     entry = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
     entry.create_system = 3  # UNIX; required in addition to external_attr.
@@ -345,20 +372,20 @@ def make_zip(package_dir: Path, destination: Path, native_paths: set[str]) -> di
 
 
 def build(args: argparse.Namespace) -> dict:
+    identity = version_metadata(args.version, getattr(args, "build_number", None))
     if args.publish_dir is None or args.arch is None:
         raise BundleError("--publish-dir and --arch are required for an application bundle")
     publish_dir = args.publish_dir.resolve()
     if not publish_dir.is_dir():
         raise BundleError("publish directory does not exist")
     inspection = inspect_publish(publish_dir, args.arch)
+    verify_project_identity(publish_dir, identity)
     if args.verify_publish:
-        return {"architecture": args.arch, "version": args.version,
+        return {"architecture": args.arch, **identity,
                 "verificationScope": "Static Mach-O code-page hashes only; no Mac launch or Apple trust evaluation.",
                 **inspection}
     if args.output_dir is None:
         raise BundleError("--output-dir is required when building a bundle")
-    if re.fullmatch(r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", args.version) is None:
-        raise BundleError("invalid version")
     output_dir = args.output_dir.resolve()
     if output_dir.is_relative_to(publish_dir):
         raise BundleError("output directory must not be inside publish output")
@@ -380,43 +407,55 @@ def build(args: argparse.Namespace) -> dict:
     for entry in inspection["files"]:
         if "sha256" in entry and sha256_file(binary_dir / entry["path"]) != entry["sha256"]:
             raise BundleError(f"copied publish file changed: {entry['path']}")
-    base_version = args.version.split("-", 1)[0]
     metadata = {
         "CFBundleIdentifier": "org.cornertodo.desktop", "CFBundleExecutable": EXECUTABLE,
         "CFBundleName": "CornerTodo", "CFBundleDisplayName": "CornerTodo Experimental",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": base_version, "CFBundleVersion": base_version,
+        "CFBundleShortVersionString": identity["bundleShortVersion"], "CFBundleVersion": identity["buildNumber"],
         "CFBundleDevelopmentRegion": "zh_CN", "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication", "LSUIElement": True,
         "CFBundleGetInfoString": f"CornerTodo {args.version} Experimental - cross-compiled; not Mac-tested",
-        "CornerTodoExperimentalVersion": args.version,
+        "CornerTodoExperimentalVersion": args.version, "CornerTodoBuildNumber": identity["buildNumber"],
         "CornerTodoDistributionStatus": "No Developer ID signing or notarization; internal test build",
     }
     with (contents / "Info.plist").open("wb") as stream:
         plistlib.dump(metadata, stream, sort_keys=False)
+    supporting_paths = [contents / "Info.plist"]
     # PNG is retained only as a resource. Do not claim it is an .icns icon.
     if args.icon_png is not None:
         if args.icon_png.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
             raise BundleError("--icon-png is not a PNG file")
         shutil.copyfile(args.icon_png, resources / "CornerTodo.png")
+        supporting_paths.append(resources / "CornerTodo.png")
     if args.guide is not None:
         shutil.copyfile(args.guide, package_dir / "测试说明.md")
+        supporting_paths.append(package_dir / "测试说明.md")
+    if getattr(args, "feedback", None) is not None:
+        shutil.copyfile(args.feedback, package_dir / "FEEDBACK.txt")
+        supporting_paths.append(package_dir / "FEEDBACK.txt")
+    supporting_files = [{"path": path.relative_to(package_dir).as_posix(), "bytes": path.stat().st_size,
+                         "sha256": sha256_file(path)} for path in supporting_paths]
     native_paths = {"CornerTodo.app/Contents/MacOS/" + entry["path"] for entry in inspection["nativeFiles"]}
     zip_checks = make_zip(package_dir, archive_path, native_paths)
+    with zipfile.ZipFile(archive_path) as zipped:
+        for entry in supporting_files:
+            if hashlib.sha256(zipped.read(package_name + "/" + entry["path"])).hexdigest() != entry["sha256"]:
+                raise BundleError("supporting file changed inside ZIP: " + entry["path"])
     archive_hash = sha256_file(archive_path)
     checksum_path.write_text(archive_hash + "  " + archive_path.name + "\n", encoding="ascii")
     manifest = {
-        "product": "CornerTodo", "version": args.version, "status": "experimental",
+        "product": "CornerTodo", **identity, "status": "experimental",
         "platform": "macOS", "minimumMacOSVersion": "14.0", "architecture": args.arch,
         "builtAtUtc": dt.datetime.now(dt.timezone.utc).isoformat(), "selfContained": True,
         "bundle": package_name + "/CornerTodo.app", "executable": EXECUTABLE,
-        "developerIdSigned": False, "notarized": False,
+        "developerIdSigned": False, "notarized": False, "macOSLaunchVerified": False,
         "verificationScope": "Static Mach-O code-page hashes, copied bytes, ZIP CRC and UNIX permissions. No native launch, CMS trust, Gatekeeper or bundle resource-seal verification.",
-        "publish": inspection, "zip": {"file": archive_path.name, "bytes": archive_path.stat().st_size,
+        "publish": inspection, "supportingFiles": supporting_files,
+        "zip": {"file": archive_path.name, "bytes": archive_path.stat().st_size,
                                         "sha256": archive_hash, **zip_checks},
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"archive": archive_path.name, "manifest": manifest_path.name,
+    return {**identity, "archive": archive_path.name, "manifest": manifest_path.name,
             "checksum": checksum_path.name, "bundle": package_name + "/CornerTodo.app",
             "sha256": archive_hash, "publishFileCount": inspection["publishFileCount"],
             "nativeFileCount": inspection["nativeFileCount"], "warnings": inspection["warnings"],
@@ -426,22 +465,24 @@ def build(args: argparse.Namespace) -> dict:
 def build_source(args: argparse.Namespace) -> dict:
     if args.output_dir is None or args.source_list is None:
         raise BundleError("source packaging requires --output-dir and --source-list")
-    if re.fullmatch(r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", args.version) is None:
-        raise BundleError("invalid version")
+    identity = version_metadata(args.version, getattr(args, "build_number", None))
     root = args.source_root.resolve()
+    source_version = root / "macOS" / "VERSION"
+    if source_version.is_file() and source_version.read_text(encoding="utf-8-sig").strip() != args.version:
+        raise BundleError("Mac source VERSION differs from the requested release version")
     relative_paths = json.loads(args.source_list.read_text(encoding="utf-8-sig"))
     if not isinstance(relative_paths, list) or not relative_paths:
         raise BundleError("source list must be a nonempty array")
     inventory = []
     seen = set()
-    forbidden = {"data", "output", "release", "archive", "backups", "bin", "obj", ".tools", "artifacts"}
+    forbidden = {"data", "output", "release", "archive", "backups", "bin", "obj", ".tools", "artifacts", "__pycache__", ".git", ".codex", ".aws"}
     for relative in relative_paths:
         if not isinstance(relative, str) or "\\" in relative or ":" in relative:
             raise BundleError("source entries must be literal portable relative paths")
         path = Path(relative)
         if path.is_absolute() or any(part in ("", ".", "..") for part in relative.split("/")):
             raise BundleError(f"invalid source entry: {relative}")
-        if any(part.lower() in forbidden for part in path.parts) or path.suffix.lower() in {".exe", ".dll", ".log", ".bak", ".zip", ".tmp"}:
+        if any(part.lower() in forbidden for part in path.parts) or path.suffix.lower() in {".exe", ".dll", ".pdb", ".log", ".bak", ".zip", ".tmp", ".pyc"}:
             raise BundleError(f"private/runtime entry rejected: {relative}")
         if relative.lower() in seen:
             raise BundleError(f"duplicate source entry: {relative}")
@@ -478,12 +519,12 @@ def build_source(args: argparse.Namespace) -> dict:
                 raise BundleError(f"source ZIP bytes changed: {record['path']}")
     digest = sha256_file(archive)
     checksum.write_text(digest + "  " + archive.name + "\n", encoding="ascii")
-    manifest = {"product": "CornerTodo", "platform": "macOS", "version": args.version,
+    manifest = {"product": "CornerTodo", "platform": "macOS", **identity,
                 "status": "experimental-source", "explicitSourceCount": len(inventory), "files": inventory,
                 "zip": {"file": archive.name, "sha256": digest, **zip_checks},
                 "macOSLaunchVerified": False}
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"archive": archive.name, "manifest": manifest_path.name, "checksum": checksum.name,
+    return {**identity, "archive": archive.name, "manifest": manifest_path.name, "checksum": checksum.name,
             "sourceDirectory": package_name, "sourceFiles": len(inventory), "sha256": digest}
 
 
@@ -492,15 +533,18 @@ def main() -> int:
     parser.add_argument("--publish-dir", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--arch", choices=("arm64", "x64"))
-    parser.add_argument("--version", default="0.1.0-alpha.1")
+    parser.add_argument("--version", default="0.2.0-alpha.1")
+    parser.add_argument("--build-number", help="Explicit numeric Apple build, e.g. 0.2.1; never inferred from an alpha suffix")
+    parser.add_argument("--version-info", action="store_true", help="Validate and print only public/bundle build metadata")
     parser.add_argument("--icon-png", type=Path)
     parser.add_argument("--guide", type=Path)
+    parser.add_argument("--feedback", type=Path, help="Plain-text feedback template placed alongside CornerTodo.app")
     parser.add_argument("--verify-publish", "--verify-only", action="store_true")
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--source-list", type=Path)
     args = parser.parse_args()
     try:
-        result = build_source(args) if args.source_root is not None else build(args)
+        result = version_metadata(args.version, args.build_number) if args.version_info else build_source(args) if args.source_root is not None else build(args)
     except (BundleError, OSError, ValueError, struct.error) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

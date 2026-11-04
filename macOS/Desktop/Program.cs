@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Avalonia;
 using CornerTodo.MacCore;
 
@@ -39,7 +40,8 @@ internal sealed class DesktopOptions
 
 internal static class Program
 {
-    internal const string Version = "0.1.0-alpha.1";
+    internal const string Version = "0.2.0-alpha.1";
+    internal const string BuildNumber = "0.2.1";
     internal static DesktopOptions Options { get; private set; } = new();
     internal static SingleInstance? Instance { get; private set; }
 
@@ -76,6 +78,17 @@ internal static class Program
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    internal static string FeedbackInformation(string dataDirectory)
+    {
+        return "CornerTodo macOS " + Version + "\n构建号：" + BuildNumber
+            + "\n系统：" + RuntimeInformation.OSDescription
+            + "\n系统架构：" + RuntimeInformation.OSArchitecture
+            + "\n程序架构：" + RuntimeInformation.ProcessArchitecture
+            + "\n具体芯片型号：请在 Apple 菜单的“关于本机”中补充"
+            + "\n数据目录：" + Path.GetFullPath(dataDirectory)
+            + "\n请补充：期望结果、实际现象、复现步骤。";
     }
 
     internal static TodoState PreviewState()

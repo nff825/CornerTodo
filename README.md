@@ -40,9 +40,11 @@ v1.8.0 新增默认关闭的到期提醒。勾选「提醒我」后才展开天�
 
 ## macOS 实验性内测版
 
-已发布的 **0.1.0-alpha.1** 面向 macOS 14+，提供 Apple M 系列与 Intel 两种包。见 [Mac 使用与构建说明](macOS/README.md) 和 [内测清单](macOS/TESTING.md)。Mac 尚待真机验收，未完成 Developer ID 签名和 Apple 公证。
+Mac 内测分支已更新至 **0.2.0-alpha.1（构建 0.2.1）**，目标 macOS 14+，提供 Apple M 系列 arm64 与 Intel x64 两种包；实际可下载附件以 Releases 为准。见 [Mac 使用说明与界面展示](macOS/README.md)、[本轮更新](macOS/RELEASE_NOTES.md)、[内测清单](macOS/TESTING.md) 和 [反馈模板](macOS/FEEDBACK.txt)。
 
-本次 v1.8.0 是 Windows 更新。Mac 开发源码同步 Version 4 的提醒计划、处理记录与共享数据保存兼容，并保留 Windows 显示偏好，但没有接入 Mac 提醒卡片／调度、悬浮模式切换或周期生成、设置和管理界面。旧 Mac 内测附件保持原样。**已发布的 Mac 0.1.0-alpha.1 不能读取新版数据**，不要用它直接打开新格式的数据目录。以下功能与界面说明主要对应 Windows 版。
+本轮 Mac 交付无截止日期、统一操作区与细滚动条、旧数据迁移前备份、版本与反馈信息。共享源码保存 Version 4 数据并保留 Windows 的重复规则、提醒和悬浮偏好，但 **Mac 尚未接入重复任务设置／生成／管理、提醒卡片／调度或悬浮切换**。旧 alpha.1 包和标签保留，不能读取新版数据。
+
+Mac 包由 Windows 交叉构建，原生启动、菜单栏、Spaces、全屏、多屏与休眠仍需 Mac 用户实测，也未完成 Developer ID 签名和 Apple 公证。下方主体功能与 WPF 图片主要对应 Windows 版；Mac 辅助图片另在 Mac 文档标明渲染环境。
 
 ## 界面预览
 

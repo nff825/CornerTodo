@@ -32,6 +32,8 @@ internal static class PreviewChecks
         }
         await ValidateTaskEditor(window);
         await ValidateNoDeadlinePanel(window, outputDirectory);
+        await ValidateUnifiedPanel(window, outputDirectory);
+        await ValidateAuxiliaryDialog(window);
         ValidateAppearance(window);
         await ValidateRealEditorFlow(window);
         await ValidateEditorLayouts(window, outputDirectory);
@@ -146,6 +148,10 @@ internal static class PreviewChecks
                 "An old undated task was counted as overdue or urgent.");
             Assert(Descendants(panel).OfType<TextBlock>().Single(text => text.Text == item.Text).FontSize == 15,
                 "An undated high-priority task was enlarged as deadline urgency.");
+            var scroll = Descendants(panel).OfType<ScrollViewer>().Single(view => AutomationProperties.GetName(view) == "待办事项列表");
+            Assert(scroll.Extent.Height <= scroll.Viewport.Height && !scroll.GetVisualDescendants().OfType<ScrollBar>()
+                .Any(bar => bar.Orientation == Avalonia.Layout.Orientation.Vertical && bar.IsVisible),
+                "An empty or short task list retained a misleading scroll indicator.");
             if (outputDirectory != null) SavePng(panel, Path.Combine(outputDirectory, "panel-no-deadline.png"));
             session.SetCompleted(item.Id, true); panel.RestorePanel(); await Task.Delay(60);
             Assert(Descendants(panel).OfType<TextBlock>().Any(text => text.Text == "未设截止") &&
@@ -154,6 +160,118 @@ internal static class PreviewChecks
             Assert(!Directory.Exists(directory), "The isolated preview unexpectedly wrote no-deadline task data.");
         }
         finally { panel.Close(); }
+    }
+
+    private static async Task ValidateUnifiedPanel(TodoWindow owner, string? outputDirectory)
+    {
+        var custom = AppearanceSettings.CreateLight();
+        custom.BackgroundColor = "#E8E1D6"; custom.PrimaryTextColor = "#263947"; custom.SecondaryTextColor = "#647583";
+        custom.BackgroundTransparency = 35;
+        var transparent = AppearanceSettings.CreateLight(); transparent.BackgroundTransparency = 100;
+        var appearances = new[] { ("light", AppearanceSettings.CreateLight()), ("dark", AppearanceSettings.CreateDark()),
+            ("custom", custom), ("transparent", transparent) };
+        foreach (var (name, appearance) in appearances)
+        {
+            var state = new TodoState();
+            state.Settings.Width = 450; state.Settings.Height = 550; state.Settings.AutoExpand = false; state.Settings.Appearance = appearance;
+            string[] labels = { "向李老师汇报研究进展", "整理实验数据", "完善论文第二章", "阅读两篇参考文献", "提交本周研究小结",
+                "核对实验记录", "准备组会讨论提纲", "整理研究资料", "检查论文格式", "归档参考文献" };
+            for (int index = 0; index < labels.Length; index++)
+            {
+                bool hasDeadline = index is not (3 or 7 or 9);
+                state.Items.Add(new TodoItem { Id = "visual-" + index, Text = labels[index],
+                    Priority = index == 0 ? TaskPriority.High : index is 3 or 7 or 9 ? TaskPriority.Low : TaskPriority.Normal,
+                    CreatedAt = DateTime.Now.AddDays(-3), DeadlineSetAt = hasDeadline ? DateTime.Now.AddDays(-3) : null,
+                    HasDeadline = hasDeadline, DueDate = hasDeadline ? DateTime.Today.AddDays(index + 2).AddHours(17) : DateTime.MinValue,
+                    HasTime = hasDeadline && index == 0 });
+            }
+            string directory = Path.Combine(Program.Options.DataDirectory, "unified-" + name);
+            var session = new TodoSession(new TodoStore(directory), state, true);
+            var panel = new TodoWindow(session, directory, () => { }) { PreviewMode = true };
+            try
+            {
+                panel.Show(owner); await Task.Delay(130); panel.UpdateLayout();
+                var add = Descendants(panel).OfType<Button>().Single(button => Equals(button.Content, "＋ 添加待办"));
+                var more = Descendants(panel).OfType<Button>().Single(button => AutomationProperties.GetName(button) == "更多操作");
+                var toolbar = panel.GetVisualDescendants().OfType<Border>().Single(border => border.Child is StackPanel tools && tools.Children.Contains(more));
+                var addSurface = ActionSurface(add);
+                Assert(ColorOf(toolbar.Background) == ColorOf(addSurface.Background) && ColorOf(toolbar.BorderBrush) == ColorOf(addSurface.BorderBrush)
+                    && toolbar.CornerRadius == new CornerRadius(8) && addSurface.CornerRadius == toolbar.CornerRadius,
+                    "Toolbar and compact add action lost their shared surface/outline/corners in " + name + ".");
+                Assert(ColorOf(addSurface.Background).A >= 180 && add.Bounds.Width < panel.Width * .6 && add.Bounds.Height >= 34,
+                    "An action became invisible on transparent wallpaper or filled the entire footer.");
+                Color initial = ColorOf(addSurface.Background);
+                ((IPseudoClasses)add.Classes).Set(":pointerover", true); await Task.Delay(25);
+                Assert(ColorOf(addSurface.Background) != initial && ColorOf(addSurface.Background).A >= 180,
+                    "The real pointer-over template state lost the action fill.");
+                Color hover = ColorOf(addSurface.Background);
+                ((IPseudoClasses)add.Classes).Set(":pressed", true); await Task.Delay(25);
+                Assert(ColorOf(addSurface.Background) != hover && ColorOf(addSurface.Background).A >= 180,
+                    "The pressed template state lost its readable action fill.");
+                ((IPseudoClasses)add.Classes).Set(":pressed", false); ((IPseudoClasses)add.Classes).Set(":pointerover", false);
+                await Task.Delay(25);
+                Assert(ColorOf(addSurface.Background) == initial, "The action did not restore its normal fill after interaction.");
+                var scroll = Descendants(panel).OfType<ScrollViewer>().Single(view => AutomationProperties.GetName(view) == "待办事项列表");
+                var bar = scroll.GetVisualDescendants().OfType<ScrollBar>().Single(candidate => candidate.Orientation == Avalonia.Layout.Orientation.Vertical);
+                var thumb = bar.GetVisualDescendants().OfType<Thumb>().Single();
+                var indicator = thumb.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "ScrollIndicator");
+                Console.WriteLine($"  panel-{name}: extent={scroll.Extent.Height:0.##}, viewport={scroll.Viewport.Height:0.##}, visible={bar.IsVisible}, bar={bar.Bounds}, thumb={thumb.Bounds}, indicator={indicator.Bounds}");
+                Assert(scroll.Extent.Height > scroll.Viewport.Height && bar.IsVisible && Math.Abs(bar.Bounds.Width - 14) < .1
+                    && Math.Abs(thumb.Bounds.Width - 14) < .1 && indicator.Width == 5 && Math.Abs(indicator.Bounds.Width - 5) <= 1 / panel.RenderScaling + .01,
+                    "The slim indicator lost its wider drag area or did not correspond to overflow.");
+                Assert(indicator.CornerRadius == new CornerRadius(2.5) && ColorOf(indicator.Background) == Color.Parse(appearance.SecondaryTextColor),
+                    "Scrollbar colour/radius did not follow the panel theme.");
+                ((IPseudoClasses)thumb.Classes).Set(":pointerover", true); await Task.Delay(20);
+                Assert(Math.Abs(indicator.Opacity - .85) < .001, "The real hover template did not emphasize the slim indicator.");
+                ((IPseudoClasses)thumb.Classes).Set(":pressed", true); await Task.Delay(20);
+                Assert(Math.Abs(indicator.Opacity - 1) < .001, "The real pressed template did not emphasize the slim indicator.");
+                ((IPseudoClasses)thumb.Classes).Set(":pressed", false); ((IPseudoClasses)thumb.Classes).Set(":pointerover", false);
+                Assert(bar.GetVisualDescendants().OfType<RepeatButton>().Count() == 2, "Arrow controls reappeared in the panel scrollbar.");
+                scroll.Offset = new Vector(0, 40); await Task.Delay(25);
+                Assert(Math.Abs(bar.Value - scroll.Offset.Y) < .1 && scroll.Offset.Y > 0, "ScrollViewer offset stopped synchronizing the real scrollbar.");
+                scroll.Offset = default; await Task.Delay(25);
+                var pageDown = bar.GetVisualDescendants().OfType<RepeatButton>().Single(button => button.Name == "PART_PageDownButton");
+                pageDown.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Task.Delay(25);
+                Assert(scroll.Offset.Y > 0, "The real scrollbar page-down action no longer scrolls content.");
+                scroll.Offset = default; await Task.Delay(25);
+                thumb.RaiseEvent(new Avalonia.Input.VectorEventArgs { RoutedEvent = Thumb.DragStartedEvent, Vector = default });
+                thumb.RaiseEvent(new Avalonia.Input.VectorEventArgs { RoutedEvent = Thumb.DragDeltaEvent, Vector = new Vector(0, 12) });
+                thumb.RaiseEvent(new Avalonia.Input.VectorEventArgs { RoutedEvent = Thumb.DragCompletedEvent, Vector = new Vector(0, 12) });
+                await Task.Delay(25);
+                Assert(scroll.Offset.Y > 0 && Math.Abs(scroll.Offset.Y - bar.Value) < .1, "The real Thumb/Track drag route stopped updating the viewport.");
+                scroll.Offset = default; await Task.Delay(25);
+                if (outputDirectory != null)
+                {
+                    SavePng(panel, Path.Combine(outputDirectory, "panel-" + name + ".png"));
+                    if (name == "light") { scroll.Offset = new Vector(0, 130); await Task.Delay(25); SavePng(panel, Path.Combine(outputDirectory, "scroll-overflow.png")); }
+                }
+                panel.SetEdgeHiddenForPreview(true); await Task.Delay(25);
+                Assert(ColorOf(((Border)panel.ContentSurface).Background).A == 244 && panel.IsEdgeHidden,
+                    "Unified actions reduced the edge capsule's independent contrast.");
+                panel.SetEdgeHiddenForPreview(false); await Task.Delay(25);
+                Assert(ColorOf(ActionSurface(add).Background) == initial && !panel.IsEdgeHidden,
+                    "Returning from the capsule changed normal action transparency.");
+                Assert(!Directory.Exists(directory), "An auxiliary visual check wrote sample task data.");
+            }
+            finally { panel.Close(); }
+        }
+    }
+
+    private static Border ActionSurface(Button button) => button.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "ActionSurface");
+    private static Color ColorOf(IBrush? brush) => brush is ISolidColorBrush solid ? solid.Color : throw new InvalidOperationException("Expected a solid panel brush.");
+
+    private static async Task ValidateAuxiliaryDialog(TodoWindow owner)
+    {
+        string information = Program.FeedbackInformation(Program.Options.DataDirectory);
+        Assert(information.Contains(Program.Version) && information.Contains(Program.BuildNumber) && information.Contains("程序架构")
+            && information.Contains(Path.GetFullPath(Program.Options.DataDirectory)), "About feedback omitted version/build/platform/data-path context.");
+        Assert(information.Contains("关于本机"), "A process architecture was incorrectly presented as a specific M-series chip model.");
+        var dialog = new Window { Title = "辅助对话框验证", Width = 280, Height = 160, ShowInTaskbar = false };
+        Ui.Style(dialog);
+        Task show = owner.ShowAuxiliaryDialog(dialog);
+        try { await Task.Delay(60); Assert(owner.IsBusy && dialog.IsVisible, "An auxiliary dialog did not guard panel movement and hiding."); }
+        finally { dialog.Close(); await show; }
+        Assert(!owner.IsBusy, "Closing an auxiliary dialog left the panel permanently busy.");
     }
 
     private static void ValidateAppearance(TodoWindow owner)
@@ -205,6 +323,16 @@ internal static class PreviewChecks
             if (outputDirectory != null) SavePng(editor, Path.Combine(outputDirectory, "editor-small.png"));
         }
         finally { editor.Close(); }
+        var undated = new TaskEditorWindow(new TodoItem { Id = "render-undated", Text = "阅读两篇参考文献", HasDeadline = false,
+            DueDate = DateTime.MinValue, CreatedAt = DateTime.Now.AddDays(-1) }, _ => false);
+        try
+        {
+            undated.Show(owner); await Task.Delay(100);
+            Assert(undated.UseDeadline.IsChecked == false && !undated.BuildDraft().HasDeadline,
+                "The no-deadline editor screenshot changed its draft semantics.");
+            if (outputDirectory != null) SavePng(undated, Path.Combine(outputDirectory, "no-deadline-editor.png"));
+        }
+        finally { undated.Close(); }
         var appearance = new AppearanceWindow(AppearanceSettings.CreateDark(), _ => { }, _ => false);
         try
         {
@@ -246,11 +374,12 @@ internal static class PreviewChecks
     private static void SavePng(Window window, string path)
     {
         window.UpdateLayout();
-        var content = (Control)window.Content!;
         double scale = Math.Max(1, window.RenderScaling);
-        using var bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)Math.Ceiling(content.Bounds.Width * scale)),
-            Math.Max(1, (int)Math.Ceiling(content.Bounds.Height * scale))), new Vector(96 * scale, 96 * scale));
-        bitmap.Render(content); bitmap.Save(path);
+        using var bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)Math.Ceiling(window.Bounds.Width * scale)),
+            Math.Max(1, (int)Math.Ceiling(window.Bounds.Height * scale))), new Vector(96 * scale, 96 * scale));
+        // Include the editor's real client background and padding; rendering its
+        // content Grid alone would misleadingly leave native controls on alpha.
+        bitmap.Render(window); bitmap.Save(path);
     }
 
     private static void ExpectInvalid(Action action, string message)

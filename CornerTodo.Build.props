@@ -144,6 +144,12 @@
     <!-- Keep linked task rules and Mac development UI in the same public source snapshot. -->
     <CornerTodoPublicFile Include="macOS/VERSION" />
     <CornerTodoPublicFile Include="macOS/README.md" />
+    <CornerTodoPublicFile Include="macOS/RELEASE_NOTES.md" />
+    <CornerTodoPublicFile Include="macOS/FEEDBACK.txt" />
+    <CornerTodoPublicFile Include="macOS/images/panel-light.png" />
+    <CornerTodoPublicFile Include="macOS/images/panel-dark.png" />
+    <CornerTodoPublicFile Include="macOS/images/no-deadline-editor.png" />
+    <CornerTodoPublicFile Include="macOS/images/scroll-overflow.png" />
     <CornerTodoPublicFile Include="macOS/TESTING.md" />
     <CornerTodoPublicFile Include="macOS/PUBLISHING.md" />
     <CornerTodoPublicFile Include="macOS/THIRD-PARTY-NOTICES.md" />
@@ -153,6 +159,8 @@
     <CornerTodoPublicFile Include="macOS/Core/CornerTodo.MacCore.csproj" />
     <CornerTodoPublicFile Include="macOS/Core/AssemblyInfo.cs" />
     <CornerTodoPublicFile Include="macOS/Core/AppPaths.cs" />
+    <CornerTodoPublicFile Include="macOS/Core/MacUpgradeBackup.cs" />
+    <CornerTodoPublicFile Include="macOS/Core/MacCompatibilityNotice.cs" />
     <CornerTodoPublicFile Include="macOS/Core/LegacyJsonSerializerAdapter.cs" />
     <CornerTodoPublicFile Include="macOS/Core/packages.lock.json" />
     <CornerTodoPublicFile Include="macOS/Tests/CornerTodo.MacTests.csproj" />
