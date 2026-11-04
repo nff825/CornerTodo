@@ -28,6 +28,8 @@ internal static class StoreTests
             Run("Missing settings use compatible defaults", SettingsCompatibility);
             Run("Optional edge auto-hide is disabled for old or malformed preferences without rewriting tasks", EdgeHideCompatibility);
             Run("Edge auto-hide saves and reloads independently of tasks and expanded geometry", EdgeHideRoundTrip);
+            Run("Optional floating preferences default off and malformed values preserve valid data", FloatingCompatibility);
+            Run("Display mode and independent expansion preferences survive restart without changing schema or tasks", FloatingRoundTrip);
             Run("Semantically invalid tasks are preserved rather than discarded", InvalidTaskIsNotDropped);
             Run("Date-only and exact-time overdue boundaries are correct", DeadlineBoundaries);
             Run("Pending order uses the effective deadline; completed order uses completion time", Ordering);
@@ -237,6 +239,55 @@ internal static class StoreTests
         Assert(state.Version == TodoState.CurrentVersion && state.Settings.Width == 430 && state.Settings.Height == 475 && !state.Settings.Collapsed, "Missing optional fields did not use defaults.");
         Assert(state.Settings.Left == -400 && state.Settings.Top == 20 && store.LoadWarning == null, "Existing optional settings were not preserved.");
         Assert(!state.Settings.EdgeAutoHide, "An older settings document silently enabled edge auto-hide.");
+    }
+
+    private static void FloatingCompatibility()
+    {
+        string[] values = { null, "false", "true", "null", "\"true\"", "1", "[]", "{}" };
+        for (int i = 0; i < values.Length; i++)
+        {
+            TodoStore store = Store("floating-compatibility-" + i);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            string settings = "{\"AutoExpand\":false,\"EdgeAutoHide\":true"
+                + (values[i] == null ? "" : ",\"AlwaysOnTop\":" + values[i] + ",\"FloatingAutoExpand\":" + values[i]) + "}";
+            string json = AppearanceDocument(settings).Replace("\"Version\":1", "\"Version\":3");
+            File.WriteAllText(store.DataFilePath, json, Encoding.UTF8);
+            byte[] before = File.ReadAllBytes(store.DataFilePath);
+            TodoState loaded = store.Load();
+            Assert(loaded.Settings.AlwaysOnTop == (values[i] == "true") && loaded.Settings.FloatingAutoExpand == (values[i] == "true"),
+                "An old or malformed display preference was unexpectedly enabled, or an enabled value was lost.");
+            Assert(!loaded.Settings.AutoExpand && loaded.Settings.EdgeAutoHide, "Floating defaults changed existing desktop or edge preferences.");
+            AssertAppearanceTask(loaded);
+            Assert(store.LoadWarning == null && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Loading optional settings rewrote or damaged saved tasks.");
+        }
+        var defaults = new WidgetSettings();
+        Assert(!defaults.AlwaysOnTop && !defaults.FloatingAutoExpand && defaults.AutoExpand && defaults.EffectiveAutoExpand,
+            "Fresh users no longer start in desktop mode with only desktop expansion enabled.");
+    }
+
+    private static void FloatingRoundTrip()
+    {
+        TodoStore store = Store("floating-round-trip");
+        TodoState state = State("窗口切换不能改变事项");
+        state.Settings.Left = 111.25; state.Settings.Top = 55.75;
+        state.Settings.Width = 490; state.Settings.Height = 610;
+        state.Settings.EdgeAutoHide = true;
+        foreach (bool floating in new[] { false, true })
+        foreach (bool desktopExpansion in new[] { false, true })
+        foreach (bool floatingExpansion in new[] { false, true })
+        {
+            state.Settings.AlwaysOnTop = floating; state.Settings.AutoExpand = desktopExpansion;
+            state.Settings.FloatingAutoExpand = floatingExpansion;
+            store.Save(state);
+            TodoState loaded = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+            Assert(loaded.Version == 3 && loaded.Settings.AlwaysOnTop == floating && loaded.Settings.AutoExpand == desktopExpansion
+                && loaded.Settings.FloatingAutoExpand == floatingExpansion && loaded.Settings.EffectiveAutoExpand == (floating ? floatingExpansion : desktopExpansion),
+                "Restart lost a display preference or mixed the desktop and floating expansion switches.");
+            Assert(loaded.Items.Single().Id == state.Items.Single().Id && loaded.Items.Single().DueDate == state.Items.Single().DueDate
+                && loaded.Settings.Left == 111.25 && loaded.Settings.Top == 55.75 && loaded.Settings.Width == 490 && loaded.Settings.Height == 610
+                && loaded.Settings.EdgeAutoHide, "Display persistence changed tasks, timing, baseline geometry or edge settings.");
+            Assert(!File.ReadAllText(store.DataFilePath).Contains("EffectiveAutoExpand"), "A derived display preference was persisted as independent state.");
+        }
     }
 
     private static void EdgeHideCompatibility()

@@ -191,6 +191,8 @@ namespace CornerTodo
                         { "Collapsed", settings.Collapsed },
                         { "CompletedCollapsed", settings.CompletedCollapsed },
                         { "AutoExpand", settings.AutoExpand },
+                        { "AlwaysOnTop", settings.AlwaysOnTop },
+                        { "FloatingAutoExpand", settings.FloatingAutoExpand },
                         { "EdgeAutoHide", settings.EdgeAutoHide },
                         { "SortMode", (int)settings.SortMode },
                         { "Appearance", new Dictionary<string, object>
@@ -288,6 +290,9 @@ namespace CornerTodo
                 state.Settings.Collapsed = Boolean(settings, "Collapsed", false);
                 state.Settings.CompletedCollapsed = Boolean(settings, "CompletedCollapsed", false);
                 state.Settings.AutoExpand = Boolean(settings, "AutoExpand", true);
+                // Optional display preferences default off without treating valid tasks as corrupt.
+                state.Settings.AlwaysOnTop = settings.TryGetValue("AlwaysOnTop", out value) && value is bool && (bool)value;
+                state.Settings.FloatingAutoExpand = settings.TryGetValue("FloatingAutoExpand", out value) && value is bool && (bool)value;
                 // An optional display preference must not discard otherwise valid
                 // tasks. Old, missing or malformed values keep auto-hide disabled.
                 state.Settings.EdgeAutoHide = settings.TryGetValue("EdgeAutoHide", out value) && value is bool && (bool)value;

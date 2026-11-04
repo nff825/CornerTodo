@@ -72,6 +72,7 @@ internal static class LifecycleUiTests
             Assert(NoHandle(window) && !Directory.Exists(dataPath), "Unshown preview wiring created an HWND or application data.");
             Assert(startup.Calls == 0, "Lifecycle wiring inspected or changed Windows startup state.");
             Console.WriteLine("PASS: " + assertions + " main-window lifecycle wiring assertions (unshown, preview session, fake screen and startup boundary).");
+            DisplayModeTests.Run();
         }
         finally
         {

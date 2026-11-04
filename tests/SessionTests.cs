@@ -37,6 +37,7 @@ internal static class SessionTests
             Run("Task detail validation rejects excessive notes and invalid ranks without committing", DetailsValidation);
             Run("Sort preference changes are isolated, idempotent and survive restart", SortPreference);
             Run("Edge auto-hide is opt-in, transactional, isolated and persistent", EdgeHidePreference);
+            Run("Floating mode saves transactionally and preserves independent expansion preferences", FloatingPreference);
             Run("Only an effective deadline change resets full-interval time progress", TimeProgressReschedule);
             Run("Undated drafts normalize scheduling fields and retain history through completion", NoDeadlineLifecycle);
             Run("Setting, removing and restoring deadlines use the current scheduling epoch", NoDeadlineScheduling);
@@ -319,6 +320,41 @@ internal static class SessionTests
             Assert(writer.Arguments.Count == 2, "A failed operation could not be retried.");
             Assert(!StatesEqual(before, session.Snapshot()), "A successful retry did not commit the requested change.");
         }
+    }
+
+    private static void FloatingPreference()
+    {
+        var writer = new RecordingStore();
+        var session = new TodoSession(writer, Fixture(), false, delegate { return Epoch; });
+        TodoState expected = Fixture();
+        session.SetAlwaysOnTop(false);
+        Assert(writer.Arguments.Count == 0, "Selecting the active desktop mode unexpectedly saved data.");
+        writer.DuringSave = delegate { throw new IOException("fixture display save failure"); };
+        ExpectSaveFailure(delegate { session.SetAlwaysOnTop(true); });
+        Equal(expected, session.Snapshot(), "An unsuccessful mode save changed committed settings.");
+        writer.DuringSave = null;
+        session.SetAlwaysOnTop(true); expected.Settings.AlwaysOnTop = true;
+        Equal(expected, session.Snapshot(), "Changing display mode altered tasks or baseline geometry.");
+        Assert(!session.Snapshot().Settings.EffectiveAutoExpand, "First floating activation unexpectedly uses desktop automatic expansion.");
+        session.SetAutoExpand(true); expected.Settings.FloatingAutoExpand = true;
+        Equal(expected, session.Snapshot(), "Floating expansion changed desktop expansion or unrelated state.");
+        writer.DuringSave = delegate { throw new IOException("fixture expansion save failure"); };
+        ExpectSaveFailure(delegate { session.SetAutoExpand(false); });
+        Equal(expected, session.Snapshot(), "Failed expansion save modified a committed mode preference.");
+        writer.DuringSave = null;
+        session.SetAlwaysOnTop(false); expected.Settings.AlwaysOnTop = false;
+        session.SetAutoExpand(false); expected.Settings.AutoExpand = false;
+        Equal(expected, session.Snapshot(), "Desktop expansion changed the saved floating preference.");
+        session.SetAlwaysOnTop(true); expected.Settings.AlwaysOnTop = true;
+        Assert(session.Snapshot().Settings.EffectiveAutoExpand, "Returning to floating mode lost its independent expansion choice.");
+        var store = new TodoStore(Path.Combine(temporaryRoot, "floating-restart"));
+        store.Save(session.Snapshot());
+        var restarted = new TodoSession(store, store.Load(), false, delegate { return Epoch; });
+        Equal(expected, restarted.Snapshot(), "Restart changed independent display preferences or task history.");
+        TodoState exposed = restarted.Snapshot(); exposed.Settings.AlwaysOnTop = false; exposed.Settings.FloatingAutoExpand = false;
+        Equal(expected, restarted.Snapshot(), "A display-settings snapshot mutated committed preferences.");
+        restarted.SetDesktopAutoExpand(true); expected.Settings.AutoExpand = true;
+        Equal(expected, restarted.Snapshot(), "An explicitly desktop frontend overwrote a Windows floating preference.");
     }
 
     private static void SettingsIsolation()

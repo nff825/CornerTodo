@@ -19,6 +19,7 @@ namespace CornerTodo
                     Left = settings.Left, Top = settings.Top, Width = settings.Width, Height = settings.Height,
                     Collapsed = settings.Collapsed, CompletedCollapsed = settings.CompletedCollapsed,
                     AutoExpand = settings.AutoExpand, EdgeAutoHide = settings.EdgeAutoHide,
+                    AlwaysOnTop = settings.AlwaysOnTop, FloatingAutoExpand = settings.FloatingAutoExpand,
                     Appearance = AppearanceSettings.Normalize(settings.Appearance), SortMode = settings.SortMode
                 }
             };

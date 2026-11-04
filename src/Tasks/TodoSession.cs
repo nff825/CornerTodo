@@ -307,6 +307,21 @@ namespace CornerTodo
 
         public void SetAutoExpand(bool enabled)
         {
+            Change(delegate(TodoState next) {
+                if (next.Settings.AlwaysOnTop) next.Settings.FloatingAutoExpand = enabled;
+                else next.Settings.AutoExpand = enabled;
+            });
+        }
+
+        public void SetAlwaysOnTop(bool enabled)
+        {
+            if (current.Settings.AlwaysOnTop == enabled) return;
+            Change(delegate(TodoState next) { next.Settings.AlwaysOnTop = enabled; });
+        }
+
+        // Frontends without Windows floating mode still edit the desktop preference.
+        public void SetDesktopAutoExpand(bool enabled)
+        {
             Change(delegate(TodoState next) { next.Settings.AutoExpand = enabled; });
         }
 

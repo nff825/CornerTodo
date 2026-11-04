@@ -56,6 +56,8 @@ namespace CornerTodo
         private bool waitingForDesktop;
         private bool lost;
         private bool disposed;
+        private bool floating;
+        private bool desktopSubscribed;
 
         public DesktopAttachmentController(Window window, bool windowed,
             Action<bool> pendingChanged, Func<bool> hostLost)
@@ -75,7 +77,7 @@ namespace CornerTodo
             retryTimer.Tick += OnRetry;
             window.ContentRendered += OnContentRendered;
             window.Closed += OnClosed;
-            if (!windowed) desktop.WindowHandleLost += OnHandleLost;
+            SetDesktopSubscription(!windowed);
         }
 
         public event EventHandler HandleLost;
@@ -84,9 +86,71 @@ namespace CornerTodo
         public void Start()
         {
             window.Dispatcher.VerifyAccess();
-            if (!CanOperate || started) return;
+            if (disposed || windowed || lost || hostLost() || started) return;
             started = true;
-            retryTimer.Start();
+            if (!floating) retryTimer.Start();
+        }
+
+        public bool IsFloating { get { return floating; } }
+        internal bool IsRetryRunning { get { return retryTimer.IsEnabled; } }
+
+        /// <summary>
+        /// Changes the display layer without showing or activating the window.
+        /// Desktop observers must be removed before Topmost is set, otherwise
+        /// their retry/z-order callbacks would immediately pull it back down.
+        /// </summary>
+        public void SetFloating(bool enabled)
+        {
+            window.Dispatcher.VerifyAccess();
+            if (disposed || lost || hostLost()) throw new InvalidOperationException("窗口正在关闭或恢复，暂时无法切换显示方式。");
+            if (floating == enabled) return;
+            bool previous = floating, previousTopmost = window.Topmost;
+            Rect bounds = windowed ? Rect.Empty : desktop.GetBounds(window);
+            try { ApplyFloating(enabled, bounds); }
+            catch (Exception changeError) {
+                try {
+                    ApplyFloating(previous, bounds);
+                    window.Topmost = previousTopmost;
+                }
+                catch (Exception recoveryError) {
+                    throw new InvalidOperationException("显示方式切换失败，恢复原显示方式时也发生错误。",
+                        new AggregateException(changeError, recoveryError));
+                }
+                throw;
+            }
+        }
+
+        private void ApplyFloating(bool enabled, Rect bounds)
+        {
+            if (enabled) {
+                floating = true;
+                retryTimer.Stop(); CancelPendingAttach(); SetDesktopSubscription(false);
+                if (!windowed) {
+                    desktop.Detach(window);
+                    if (!bounds.IsEmpty) desktop.SetBounds(window, bounds);
+                }
+                window.Topmost = true;
+                bool clearPending = pendingKnown && waitingForDesktop;
+                pendingKnown = false; waitingForDesktop = false;
+                if (clearPending) pendingChanged(false);
+            }
+            else {
+                window.Topmost = false;
+                floating = false;
+                SetDesktopSubscription(!windowed);
+                pendingKnown = false; waitingForDesktop = false;
+                if (!windowed && !bounds.IsEmpty) desktop.SetBounds(window, bounds);
+                if (!windowed && started) retryTimer.Start();
+                if (!windowed && (renderObserved || attachAttempted)) AttachNow();
+            }
+        }
+
+        private void SetDesktopSubscription(bool subscribe)
+        {
+            if (desktopSubscribed == subscribe) return;
+            if (subscribe) desktop.WindowHandleLost += OnHandleLost;
+            else desktop.WindowHandleLost -= OnHandleLost;
+            desktopSubscribed = subscribe;
         }
 
         /// <summary>Attaches immediately for an explicit restore, preserving screen DIP bounds.</summary>
@@ -106,14 +170,14 @@ namespace CornerTodo
             ReportPending(!attached);
         }
 
-        private bool CanOperate { get { return !disposed && !windowed && !lost && !hostLost(); } }
+        private bool CanOperate { get { return !disposed && !windowed && !floating && !lost && !hostLost(); } }
 
         private void OnContentRendered(object sender, EventArgs e)
         {
             if (disposed || renderObserved) return;
             renderObserved = true;
             FrameworkElement content = window.Content as FrameworkElement;
-            Diagnostics.Log("ContentRendered " + (windowed ? "windowed" : desktop.Diagnostics(window)) +
+            Diagnostics.Log("ContentRendered " + (windowed || floating ? (floating ? "floating" : "windowed") : desktop.Diagnostics(window)) +
                 ", WPF-visible=" + window.IsVisible + ", content=" +
                 (content == null ? "none" : content.ActualWidth + "x" + content.ActualHeight));
             if (!CanOperate || attachAttempted || window.Dispatcher.HasShutdownStarted) return;
@@ -143,7 +207,7 @@ namespace CornerTodo
 
         private void OnHandleLost(object sender, EventArgs e)
         {
-            if (disposed || windowed || lost || !Object.ReferenceEquals(sender, window)) return;
+            if (disposed || windowed || floating || lost || !Object.ReferenceEquals(sender, window)) return;
             lost = true;
             retryTimer.Stop();
             CancelPendingAttach();
@@ -170,10 +234,8 @@ namespace CornerTodo
             CancelPendingAttach();
             window.ContentRendered -= OnContentRendered;
             window.Closed -= OnClosed;
-            if (!windowed) {
-                desktop.WindowHandleLost -= OnHandleLost;
-                desktop.Detach(window);
-            }
+            SetDesktopSubscription(false);
+            if (!windowed && !floating) desktop.Detach(window);
         }
     }
 }

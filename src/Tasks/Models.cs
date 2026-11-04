@@ -35,6 +35,8 @@ namespace CornerTodo
             Width = 430;
             Height = 475;
             AutoExpand = true;
+            AlwaysOnTop = false;
+            FloatingAutoExpand = false;
             EdgeAutoHide = false;
             Appearance = AppearanceSettings.CreateLight();
             SortMode = TaskSortMode.Deadline;
@@ -47,6 +49,9 @@ namespace CornerTodo
         public bool Collapsed { get; set; }
         public bool CompletedCollapsed { get; set; }
         public bool AutoExpand { get; set; }
+        public bool AlwaysOnTop { get; set; }
+        public bool FloatingAutoExpand { get; set; }
+        public bool EffectiveAutoExpand { get { return AlwaysOnTop ? FloatingAutoExpand : AutoExpand; } }
         public bool EdgeAutoHide { get; set; }
         public AppearanceSettings Appearance { get; set; }
         public TaskSortMode SortMode { get; set; }

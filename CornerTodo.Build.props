@@ -87,6 +87,7 @@
     <CornerTodoTestSource Include="tests/DesktopAttachmentTests.cs"><Suite>Desktop</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/LifecycleTests.cs"><Suite>Lifecycle</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/LifecycleUiTests.cs"><Suite>Lifecycle</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/DisplayModeTests.cs"><Suite>Lifecycle</Suite></CornerTodoTestSource>
   </ItemGroup>
   <ItemGroup>
     <CornerTodoPublicFile Include=".gitignore" />
@@ -126,6 +127,8 @@
     <CornerTodoPublicFile Include="docs/images/recurring-editor-weekly.png" />
     <CornerTodoPublicFile Include="docs/images/recurring-management.png" />
     <CornerTodoPublicFile Include="docs/images/recurring-panel.png" />
+    <CornerTodoPublicFile Include="docs/images/unified-panel.png" />
+    <CornerTodoPublicFile Include="docs/images/unified-dark-panel.png" />
     <!-- Keep linked task rules and Mac development UI in the same public source snapshot. -->
     <CornerTodoPublicFile Include="macOS/VERSION" />
     <CornerTodoPublicFile Include="macOS/README.md" />

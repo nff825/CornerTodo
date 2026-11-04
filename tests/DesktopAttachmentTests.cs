@@ -27,6 +27,13 @@ internal static class DesktopAttachmentTests
             Run("A queued first attachment is cancelled when the native handle is lost", HandleLossBeforeRender);
             Run("An externally lost host blocks both immediate and retry operations", ExternalHostLoss);
             Run("Disposal after an active attachment prevents retry, callbacks and later events", DisposeAfterAttach);
+            Run("Floating cancels queued attachment and resumes desktop observers once", FloatingCancelsQueuedAttach);
+            Run("Floating and desktop transitions preserve current screen geometry", FloatingPreservesBounds);
+            Run("A saved floating mode starts without attaching after rendering", FloatingBeforeRendering);
+            Run("A failed display transition restores desktop mode and geometry", FloatingFailureRestoresDesktop);
+            Run("A failed return to desktop restores floating mode without desktop observers", DesktopFailureRestoresFloating);
+            Run("Floating clears a pending desktop warning and blocks loss callbacks", FloatingClearsPending);
+            Run("Diagnostic windowed mode can preview floating without native desktop operations", FloatingWindowed);
             Console.WriteLine("PASS: " + passed + " desktop-attachment tests; native operations used fakes and no windows were shown.");
             return 0;
         }
@@ -206,6 +213,121 @@ internal static class DesktopAttachmentTests
         }
     }
 
+    private static void FloatingCancelsQueuedAttach()
+    {
+        using (Fixture fixture = new Fixture(false)) {
+            fixture.Controller.Start(); fixture.Window.Rendered();
+            fixture.Controller.SetFloating(true); Pump();
+            Assert(fixture.Controller.IsFloating && fixture.Window.Topmost && !fixture.Controller.IsRetryRunning,
+                "Floating did not set Topmost or stop desktop retry.");
+            Assert(fixture.Desktop.AttachCalls == 0 && fixture.Desktop.SubscriberCount == 0 && fixture.Desktop.DetachCalls == 1,
+                "The initial desktop callback survived floating mode.");
+            int operations = fixture.Desktop.OperationCalls;
+            fixture.Controller.AttachNow(); fixture.Controller.RetryNow(); fixture.Window.Rendered(); Pump();
+            Assert(fixture.Desktop.OperationCalls == operations, "Floating issued desktop attach/retry operations.");
+            fixture.Controller.SetFloating(false); Pump();
+            Assert(!fixture.Controller.IsFloating && !fixture.Window.Topmost && fixture.Controller.IsRetryRunning &&
+                fixture.Desktop.AttachCalls == 1 && fixture.Desktop.SubscriberCount == 1,
+                "Returning to desktop did not reattach and subscribe exactly once.");
+            operations = fixture.Desktop.OperationCalls; fixture.Controller.SetFloating(false);
+            Assert(fixture.Desktop.OperationCalls == operations && fixture.Desktop.SubscriberCount == 1,
+                "Reselecting the current mode repeated native work.");
+            NoHandle(fixture.Window);
+        }
+    }
+
+    private static void FloatingPreservesBounds()
+    {
+        using (Fixture fixture = new Fixture(false)) {
+            fixture.Controller.Start(); fixture.Controller.AttachNow();
+            var original = new Rect(-810, 125, 720, 530);
+            fixture.Desktop.Bounds = original; fixture.Desktop.MutateBoundsDuringDetach = true;
+            fixture.Controller.SetFloating(true);
+            Bounds(original, fixture.Desktop.Bounds, "Desktop detach replaced current bounds");
+            fixture.Desktop.Bounds = new Rect(1220, 80, 430, 475);
+            fixture.Desktop.MutateBoundsDuringAttach = true;
+            fixture.Controller.SetFloating(false);
+            Bounds(new Rect(1220, 80, 430, 475), fixture.Desktop.Bounds, "Returning to desktop restored stale bounds");
+            NoHandle(fixture.Window);
+        }
+    }
+
+    private static void FloatingBeforeRendering()
+    {
+        using (Fixture fixture = new Fixture(false)) {
+            fixture.Controller.SetFloating(true); fixture.Controller.Start(); fixture.Window.Rendered(); Pump();
+            Assert(fixture.Desktop.AttachCalls == 0 && fixture.Desktop.DiagnosticCalls == 0 && fixture.Desktop.SubscriberCount == 0,
+                "Saved floating mode touched the desktop rendering/attachment path.");
+            fixture.Controller.SetFloating(false);
+            Assert(fixture.Desktop.AttachCalls == 1 && fixture.Controller.IsRetryRunning,
+                "A controller initially started floating could not later enter desktop mode.");
+        }
+    }
+
+    private static void FloatingFailureRestoresDesktop()
+    {
+        using (Fixture fixture = new Fixture(false)) {
+            fixture.Controller.Start(); fixture.Controller.AttachNow();
+            Rect original = fixture.Desktop.Bounds;
+            fixture.Desktop.MutateBoundsDuringDetach = true; fixture.Desktop.FailDetachOnce = true;
+            bool failed = false;
+            try { fixture.Controller.SetFloating(true); }
+            catch (InvalidOperationException) { failed = true; }
+            Assert(failed && !fixture.Controller.IsFloating && !fixture.Window.Topmost && fixture.Desktop.Attached,
+                "A failed native detach left a false floating mode.");
+            Assert(fixture.Desktop.SubscriberCount == 1 && fixture.Controller.IsRetryRunning,
+                "A failed mode change lost desktop subscriptions/recovery.");
+            Bounds(original, fixture.Desktop.Bounds, "Failed mode change lost geometry");
+            NoHandle(fixture.Window);
+        }
+    }
+
+    private static void FloatingClearsPending()
+    {
+        using (Fixture fixture = new Fixture(false)) {
+            fixture.Desktop.AttachSucceeds = false;
+            fixture.Controller.Start(); fixture.Controller.AttachNow();
+            fixture.Controller.SetFloating(true);
+            fixture.Desktop.RaiseLoss(fixture.Window);
+            Assert(fixture.Pending.Count == 2 && fixture.Pending[0] && !fixture.Pending[1] && fixture.Losses == 0,
+                "Floating kept a stale pending warning or forwarded a desktop loss.");
+            int detachCalls = fixture.Desktop.DetachCalls;
+            fixture.Controller.Dispose();
+            Assert(fixture.Desktop.DetachCalls == detachCalls && fixture.Desktop.SubscriberCount == 0,
+                "Disposing a detached floating window invoked a second desktop detach.");
+        }
+    }
+
+    private static void DesktopFailureRestoresFloating()
+    {
+        using (Fixture fixture = new Fixture(false)) {
+            fixture.Controller.Start(); fixture.Window.Rendered(); Pump();
+            fixture.Controller.SetFloating(true);
+            Rect previous = fixture.Desktop.Bounds;
+            fixture.Desktop.FailAttachOnce = true; fixture.Desktop.MutateBoundsDuringAttach = true;
+            bool failed = false;
+            try { fixture.Controller.SetFloating(false); }
+            catch (InvalidOperationException) { failed = true; }
+            Assert(failed && fixture.Controller.IsFloating && fixture.Window.Topmost && !fixture.Controller.IsRetryRunning &&
+                fixture.Desktop.SubscriberCount == 0 && !fixture.Desktop.Attached,
+                "Failed return-to-desktop left desktop observers or removed floating Topmost.");
+            Bounds(previous, fixture.Desktop.Bounds, "Failed return-to-desktop lost geometry");
+            NoHandle(fixture.Window);
+        }
+    }
+
+    private static void FloatingWindowed()
+    {
+        using (Fixture fixture = new Fixture(true)) {
+            fixture.Controller.SetFloating(true); fixture.Controller.Start(); fixture.Window.Rendered(); Pump();
+            Assert(fixture.Window.Topmost && fixture.Controller.IsFloating, "Windowed preview could not reflect floating mode.");
+            fixture.Controller.SetFloating(false); fixture.Controller.AttachNow(); fixture.Controller.RetryNow();
+            Assert(!fixture.Window.Topmost && fixture.Desktop.OperationCalls == 0 && fixture.Desktop.SubscriberCount == 0,
+                "Diagnostic preview touched native desktop integration.");
+            NoHandle(fixture.Window);
+        }
+    }
+
     private static void Pump()
     {
         Dispatcher dispatcher = Dispatcher.CurrentDispatcher;
@@ -231,6 +353,7 @@ internal static class DesktopAttachmentTests
         public int SubscriberCount;
         public int AttachCalls, RetryCalls, GetCalls, SetCalls, IsAttachedCalls, DetachCalls, DiagnosticCalls, ErrorReads;
         public bool AttachSucceeds = true, RetrySucceeds = true, Attached, MutateBoundsDuringAttach;
+        public bool MutateBoundsDuringDetach, FailDetachOnce, FailAttachOnce;
         public Rect Bounds = new Rect(1500, 18, 430, 475);
         public int OperationCalls { get { return AttachCalls + RetryCalls + GetCalls + SetCalls + IsAttachedCalls + DetachCalls; } }
         public event EventHandler WindowHandleLost
@@ -243,6 +366,7 @@ internal static class DesktopAttachmentTests
         {
             AttachCalls++; Attached = AttachSucceeds;
             if (MutateBoundsDuringAttach) Bounds = new Rect(0, 0, 12, 12);
+            if (FailAttachOnce) { FailAttachOnce = false; throw new InvalidOperationException("Injected attach failure"); }
             return Attached;
         }
         public bool IsAttached(Window window) { IsAttachedCalls++; return Attached; }
@@ -250,7 +374,11 @@ internal static class DesktopAttachmentTests
         public Rect GetBounds(Window window) { GetCalls++; return Bounds; }
         public void SetBounds(Window window, Rect bounds) { SetCalls++; Bounds = bounds; }
         public string Diagnostics(Window window) { DiagnosticCalls++; return "fake desktop"; }
-        public void Detach(Window window) { DetachCalls++; Attached = false; }
+        public void Detach(Window window) {
+            DetachCalls++; Attached = false;
+            if (MutateBoundsDuringDetach) Bounds = new Rect(0, 0, 12, 12);
+            if (FailDetachOnce) { FailDetachOnce = false; throw new InvalidOperationException("Injected detach failure"); }
+        }
         public void RaiseLoss(Window window)
         { EventHandler handler = handleLost; if (handler != null) handler(window, EventArgs.Empty); }
     }

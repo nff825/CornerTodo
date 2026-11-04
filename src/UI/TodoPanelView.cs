@@ -72,13 +72,16 @@ namespace CornerTodo
             AttentionText = Theme.Text("", 12, Theme.Muted); AttentionText.Margin = new Thickness(0, 7, 0, 0);
             titles.Children.Add(TitleText); titles.Children.Add(DateText); titles.Children.Add(AttentionText); Header.Children.Add(titles);
             var toolbar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
-            CollapseButton = new Button { Content = "⌃", FontSize = 21, Style = Theme.FlatButton(), Width = 34, Height = 32, ToolTip = "收起面板" };
+            CollapseButton = new Button { Content = "⌃", FontSize = 21, Style = Theme.FlatButton(), Width = 34, Height = 32,
+                Padding = new Thickness(5, 1, 5, 1), ToolTip = "收起面板" };
             CollapseButton.Click += delegate { if (actions.ToggleCollapsed != null) actions.ToggleCollapsed(); };
-            MoreButton = new Button { Content = "⋯", FontSize = 22, Style = Theme.FlatButton(), Width = 34, Height = 32, ToolTip = "更多" };
+            MoreButton = new Button { Content = "⋯", FontSize = 22, Style = Theme.FlatButton(), Width = 34, Height = 32,
+                Padding = new Thickness(5, 1, 5, 1), ToolTip = "更多" };
             AutomationProperties.SetName(MoreButton, "更多操作");
             MoreButton.Click += delegate { if (actions.ShowMenu != null) actions.ShowMenu(); };
             toolbar.Children.Add(CollapseButton); toolbar.Children.Add(MoreButton);
-            ToolbarSurface = new Border { Child = toolbar, CornerRadius = new CornerRadius(6), VerticalAlignment = VerticalAlignment.Top };
+            ToolbarSurface = new Border { Child = toolbar, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Top };
             Grid.SetColumn(ToolbarSurface, 1); Header.Children.Add(ToolbarSurface);
             Root.Children.Add(Header);
             taskList = new TaskListView(actions);
@@ -89,7 +92,8 @@ namespace CornerTodo
             Grid.SetRow(Scroll, 1); Root.Children.Add(Scroll);
             var footer = new Grid { Margin = new Thickness(0, 8, 0, 0) };
             AddButton = new Button { Content = "+  添加待办", FontSize = 15, Style = Theme.FlatButton(), HorizontalAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(0, 7, 12, 7) };
+                MinHeight = 34, Padding = new Thickness(11, 5, 11, 5) };
+            AutomationProperties.SetName(AddButton, "添加待办");
             AddButton.Click += delegate { if (actions.Add != null) actions.Add(); }; footer.Children.Add(AddButton);
             Grip = new Thumb { Width = 20, Height = 20, Cursor = Cursors.SizeNWSE, HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Bottom,
@@ -152,7 +156,7 @@ namespace CornerTodo
             Surface.CornerRadius = hidden ? new CornerRadius(16, 0, 0, 16) : new CornerRadius(12);
             Surface.BorderThickness = hidden ? new Thickness(1, 1, 0, 1) : new Thickness(0);
             // The handle must remain findable even with a fully transparent panel.
-            Surface.Background = hidden ? Palette.ToolbarBackground : Palette.Background;
+            Surface.Background = hidden ? Palette.CapsuleBackground : Palette.Background;
             Surface.BorderBrush = Palette.Separator;
         }
 
@@ -161,13 +165,15 @@ namespace CornerTodo
         private void ApplyPalette(AppearanceSettings appearance)
         {
             Palette = new PanelPalette(appearance);
-            Surface.Background = edgeHidden ? Palette.ToolbarBackground : Palette.Background;
+            Surface.Background = edgeHidden ? Palette.CapsuleBackground : Palette.Background;
             Surface.BorderBrush = Palette.Separator;
             TitleText.Foreground = Palette.Ink;
             DateText.Foreground = Palette.Muted;
             StatusText.Foreground = Palette.Warning;
-            CollapseButton.Style = MoreButton.Style = AddButton.Style = Palette.ButtonStyle;
+            CollapseButton.Style = MoreButton.Style = Palette.ButtonStyle;
+            AddButton.Style = Palette.ActionButtonStyle;
             ToolbarSurface.Background = Palette.ToolbarBackground;
+            ToolbarSurface.BorderBrush = Palette.ToolbarBorder;
             Scroll.Foreground = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Palette.Muted;
             Grip.Template = Palette.ResizeTemplate;
             EdgeButton.Style = Palette.ButtonStyle;
@@ -181,7 +187,7 @@ namespace CornerTodo
             bool collapsed = state.Settings.Collapsed;
             Scroll.Visibility = AddButton.Visibility = Grip.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
             AttentionText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-            Grip.IsEnabled = !state.Settings.AutoExpand || TodoRules.Expansion(state, now) <= 0.00001;
+            Grip.IsEnabled = !state.Settings.EffectiveAutoExpand || TodoRules.Expansion(state, now) <= 0.00001;
             Grip.Opacity = Grip.IsEnabled ? 1 : 0.3;
             Grip.ToolTip = Grip.IsEnabled ? "调整常态大小" : "当前按截止时间扩大；关闭自动扩展后可调整常态大小";
             CollapseButton.Content = collapsed ? "⌄" : "⌃"; CollapseButton.ToolTip = collapsed ? "展开面板" : "收起面板";

@@ -122,7 +122,10 @@ namespace CornerTodo
         public readonly SolidColorBrush Urgent;
         public readonly SolidColorBrush Separator;
         public readonly SolidColorBrush ToolbarBackground;
+        public readonly SolidColorBrush ToolbarBorder;
+        public readonly SolidColorBrush CapsuleBackground;
         public readonly Style ButtonStyle;
+        public readonly Style ActionButtonStyle;
         public readonly Style CheckStyle;
         public readonly ControlTemplate ResizeTemplate;
 
@@ -138,10 +141,24 @@ namespace CornerTodo
             Warning = Hex(dark ? "#FFB4AB" : "#A1463C");
             Urgent = Hex(dark ? "#F6CA75" : "#98651D");
             Separator = Frozen(dark ? Color.FromArgb(55, 255, 255, 255) : Color.FromArgb(45, 25, 60, 80));
-            // Keep the menu/collapse targets visible even at 100% background transparency.
-            ToolbarBackground = Frozen(dark ? Color.FromArgb(244, 24, 43, 56) : Color.FromArgb(244, 244, 249, 251));
-            ButtonStyle = new Style(typeof(Button), Theme.FlatButton());
-            ButtonStyle.Setters.Add(new Setter(Control.ForegroundProperty, Accent));
+            // Use one restrained, theme-derived surface for both toolbar and add
+            // action. A minimum fill alpha keeps both entry points findable even
+            // when the user makes the main panel completely transparent.
+            Color actionColor = Mix(backgroundColor, Muted.Color, 0.18);
+            byte actionAlpha = (byte)Math.Max(180, Math.Round(alpha * 0.8));
+            ToolbarBackground = Frozen(Color.FromArgb(actionAlpha, actionColor.R, actionColor.G, actionColor.B));
+            ToolbarBorder = Frozen(Color.FromArgb(75, Muted.Color.R, Muted.Color.G, Muted.Color.B));
+            // The narrow edge handle needs stronger contrast against arbitrary
+            // wallpapers; retain its prior opacity independently of action fills.
+            CapsuleBackground = Frozen(Color.FromArgb(244, actionColor.R, actionColor.G, actionColor.B));
+            Color hoverColor = Mix(actionColor, Accent.Color, 0.12);
+            Color pressedColor = Mix(actionColor, Accent.Color, 0.22);
+            ButtonStyle = PanelButton(Brushes.Transparent, Brushes.Transparent,
+                Frozen(Color.FromArgb(42, Accent.Color.R, Accent.Color.G, Accent.Color.B)),
+                Frozen(Color.FromArgb(68, Accent.Color.R, Accent.Color.G, Accent.Color.B)));
+            ActionButtonStyle = PanelButton(ToolbarBackground, ToolbarBorder,
+                Frozen(Color.FromArgb(actionAlpha, hoverColor.R, hoverColor.G, hoverColor.B)),
+                Frozen(Color.FromArgb(actionAlpha, pressedColor.R, pressedColor.G, pressedColor.B)));
             string outline = Muted.Color.ToString();
             string accent = Accent.Color.ToString();
             string tick = dark ? "#182B38" : "#FFFFFF";
@@ -155,6 +172,34 @@ namespace CornerTodo
                 <Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Circle' Property='StrokeThickness' Value='2.5'/></Trigger></ControlTemplate.Triggers>
               </ControlTemplate></Setter.Value></Setter></Style>");
             ResizeTemplate = (ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Thumb'><Grid Background='Transparent'><Path Data='M 10,17 L 17,10 M 14,17 L 17,14' Stroke='" + outline + @"' StrokeThickness='1.2' Opacity='0.75'/></Grid></ControlTemplate>");
+        }
+
+        private Style PanelButton(Brush background, Brush border, Brush hover, Brush pressed)
+        {
+            var style = new Style(typeof(Button), Theme.FlatButton());
+            style.Setters.Add(new Setter(Control.ForegroundProperty, Accent));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, background));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, border));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            style.Setters.Add(new Setter(Control.TemplateProperty, (ControlTemplate)XamlReader.Parse(@"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Button'>
+              <Border x:Name='Surface' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='8' Padding='{TemplateBinding Padding}'>
+                <ContentPresenter HorizontalAlignment='{TemplateBinding HorizontalContentAlignment}' VerticalAlignment='Center'/>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Surface' Property='Background' Value='" + hover.ToString() + @"'/></Trigger>
+                <Trigger Property='IsPressed' Value='True'><Setter TargetName='Surface' Property='Background' Value='" + pressed.ToString() + @"'/></Trigger>
+                <Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Surface' Property='BorderBrush' Value='" + Accent.ToString() + @"'/></Trigger>
+                <Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='0.5'/><Setter Property='Cursor' Value='Arrow'/></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>")));
+            return style;
+        }
+
+        private static Color Mix(Color first, Color second, double amount)
+        {
+            return Color.FromRgb((byte)Math.Round(first.R * (1 - amount) + second.R * amount),
+                (byte)Math.Round(first.G * (1 - amount) + second.G * amount),
+                (byte)Math.Round(first.B * (1 - amount) + second.B * amount));
         }
 
         private static SolidColorBrush Hex(string value) { return Frozen((Color)ColorConverter.ConvertFromString(value)); }

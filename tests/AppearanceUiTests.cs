@@ -42,6 +42,7 @@ internal static class AppearanceUiTests
             Report.AppendLine("CornerTodo appearance offscreen validation: " + DateTime.Now.ToString("O"));
             Report.AppendLine("No Window.Show, ShowDialog, native color dialog, desktop attachment or production data is used.");
             ValidatePresetRendering();
+            ValidateUnifiedControls();
             ValidateBackgroundOnlyTransparency();
             ValidateAttentionTheme();
             ValidatePreviewSaveAndFailure();
@@ -136,6 +137,149 @@ internal static class AppearanceUiTests
         }
         finally { window.Close(); }
         Report.AppendLine("Transparency: 0% and 100% alter only the panel fill alpha; text alpha, text opacity and parent opacity remain unchanged.");
+    }
+
+    private static void ValidateUnifiedControls()
+    {
+        AppearanceSettings custom = new AppearanceSettings { BackgroundTransparency = 58, BackgroundColor = "#DFEEE2",
+            PrimaryTextColor = "#193C29", SecondaryTextColor = "#4D7057" };
+        AppearanceSettings transparent = AppearanceSettings.CreateDark(); transparent.BackgroundTransparency = 100;
+        AppearanceSettings[] themes = { AppearanceSettings.CreateLight(), AppearanceSettings.CreateDark(),
+            AppearanceSettings.CreateOriginal(), custom, transparent };
+        Color? lightSurface = null;
+        for (int index = 0; index < themes.Length; index++)
+        {
+            TodoState state = UnifiedScenario(); state.Settings.Appearance = themes[index];
+            string dataPath = Path.Combine(isolatedRoot, "unified-" + index);
+            MainWindow window = new MainWindow(new TodoStore(dataPath), state, true, true);
+            try
+            {
+                // Fix only this synthetic fixture's date for reproducible docs.
+                window.Panel.Render(state, new DateTime(2026, 11, 4, 14, 0, 0), true, themes[index]);
+                string imageName = index == 0 ? "unified-panel.png" : index == 1 ? "unified-dark-panel.png" :
+                    index == 3 ? "unified-custom-panel.png" : index == 4 ? "unified-transparent-panel.png" : null;
+                RenderWindow(window, imageName, true);
+                TodoPanelView panel = window.Panel;
+                Button add = panel.AddButton;
+                Border addSurface = ButtonSurface(add);
+                Color toolbarColor = BrushColor(panel.ToolbarSurface.Background);
+                Assert(toolbarColor == BrushColor(addSurface.Background), "Toolbar and add action must have exactly the same base surface color and alpha.");
+                Assert(BrushColor(panel.ToolbarSurface.BorderBrush) == BrushColor(addSurface.BorderBrush),
+                    "Toolbar and add action must share their subtle outline color.");
+                Assert(panel.ToolbarSurface.CornerRadius == addSurface.CornerRadius,
+                    "Toolbar and add action must share the same corner radius.");
+                Assert(toolbarColor.A >= 180 && toolbarColor.A < 240,
+                    "Action entry points must stay visible without becoming the old nearly opaque white block.");
+                Assert(add.ActualWidth < panel.Surface.ActualWidth / 2 && add.Padding.Left >= 10 && add.Padding.Right >= 10,
+                    "The add action should be a compact padded control rather than a full-width footer fill.");
+                Assert(add.ActualHeight >= 32 && panel.ToolbarSurface.ActualHeight >= 32,
+                    "Unified action controls must keep a usable pointer target.");
+                if (index == 0) lightSurface = toolbarColor;
+                if (index == 1 || index == 3) Assert(toolbarColor != lightSurface.Value,
+                    "Dark/custom action surfaces must derive from the selected theme, not a fixed light swatch.");
+
+                // Read-only input dependency properties are driven directly in
+                // this offscreen harness so the real template triggers execute.
+                // This does not emulate native mouse routing or create an HWND.
+                SetInputState(add, typeof(UIElement), "IsMouseOverPropertyKey", true);
+                RenderWindow(window, null, true);
+                Color hovered = BrushColor(ButtonSurface(add).Background);
+                Assert(hovered.A >= toolbarColor.A && hovered != toolbarColor,
+                    "Hover must preserve the add action's visible fill and provide distinct feedback.");
+                SetInputState(add, typeof(ButtonBase), "IsPressedPropertyKey", true);
+                RenderWindow(window, null, true);
+                Color pressed = BrushColor(ButtonSurface(add).Background);
+                Assert(pressed.A >= toolbarColor.A && pressed != hovered,
+                    "Pressed must remain visible and differ from hover.");
+                SetInputState(add, typeof(ButtonBase), "IsPressedPropertyKey", false);
+                SetInputState(add, typeof(UIElement), "IsMouseOverPropertyKey", false);
+                RenderWindow(window, null, true);
+                Assert(BrushColor(ButtonSurface(add).Background) == toolbarColor, "Leaving the add action must restore its shared base fill.");
+
+                SetInputState(panel.MoreButton, typeof(UIElement), "IsMouseOverPropertyKey", true);
+                RenderWindow(window, null, true);
+                Assert(BrushColor(ButtonSurface(panel.MoreButton).Background).A > 0 &&
+                    BrushColor(panel.ToolbarSurface.Background) == toolbarColor,
+                    "Toolbar hover must be visible over the same persistent theme surface.");
+                SetInputState(panel.MoreButton, typeof(UIElement), "IsMouseOverPropertyKey", false);
+                RenderWindow(window, null, true);
+
+                ScrollBar bar = (ScrollBar)panel.Scroll.Template.FindName("PART_VerticalScrollBar", panel.Scroll);
+                Assert(bar != null && panel.Scroll.ComputedVerticalScrollBarVisibility == Visibility.Visible && panel.Scroll.ScrollableHeight > 0,
+                    "Long fixture must expose a real scrollable viewport and scrollbar.");
+                Track track = (Track)bar.Template.FindName("PART_Track", bar);
+                Border indicator = (Border)track.Thumb.Template.FindName("Indicator", track.Thumb);
+                Assert(indicator != null && indicator.ActualWidth >= 4 && indicator.ActualWidth <= 6 && bar.ActualWidth >= 14,
+                    "Scrollbar must stay visually slim with a wider usable drag target.");
+                Brush expectedScrollColor = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : panel.Palette.Muted;
+                Assert(BrushColor(indicator.Background) == BrushColor(expectedScrollColor) && indicator.Opacity >= 0.5,
+                    "Scrollbar must follow the theme's secondary color and remain visible with transparent panels.");
+                Near(1, add.Opacity, "Action control opacity");
+                Near(1, panel.Surface.Opacity, "Unified panel opacity");
+                window.Width = 48; window.Height = 152;
+                panel.SetEdgeHidden(true);
+                panel.Render(state, new DateTime(2026, 11, 4, 14, 0, 0), true, themes[index]);
+                RenderWindow(window, null, true);
+                Color capsuleColor = BrushColor(panel.Surface.Background);
+                Assert(capsuleColor.A >= 230 && capsuleColor.R == toolbarColor.R && capsuleColor.G == toolbarColor.G && capsuleColor.B == toolbarColor.B,
+                    "The edge capsule must retain a highly visible, theme-matched fill independently of normal action transparency.");
+                Assert(panel.Surface.Child == panel.EdgeButton && BrushColor(panel.Palette.Ink).A == 255,
+                    "Theme refresh must preserve the compact capsule and its opaque text, including on fully transparent panels.");
+                Assert(BrushColor(panel.ToolbarSurface.Background) == toolbarColor,
+                    "The capsule's stronger fill must not change the normal toolbar color or transparency.");
+                panel.SetEdgeHidden(false); window.Width = 430; window.Height = 540;
+                RenderWindow(window, null, true);
+                Assert(panel.Surface.Child == panel.Root && BrushColor(ButtonSurface(add).Background) == toolbarColor &&
+                    BrushColor(panel.ToolbarSurface.Background) == toolbarColor,
+                    "Expanding the capsule must restore the unified normal action surfaces.");
+                Assert(!Directory.Exists(dataPath), "Unified style validation unexpectedly wrote application data.");
+                AssertNoHandle(window);
+            }
+            finally { window.Close(); }
+        }
+        Report.AppendLine("Unified actions: light/dark/original/custom/transparent themes share toolbar and compact add surfaces; real hover/pressed template transitions preserve fill; slim scrollbar retains its wider drag area; independent edge fill retains capsule contrast across theme refresh and reveal.");
+    }
+
+    private static TodoState UnifiedScenario()
+    {
+        DateTime now = new DateTime(2026, 11, 4, 14, 0, 0);
+        TodoState state = new TodoState(); state.Settings.Width = 430; state.Settings.Height = 540;
+        state.Settings.AutoExpand = false;
+        string[] titles = { "向李老师汇报研究进展", "整理实验数据", "完成论文初稿", "阅读两篇参考文献", "提交周报", "整理书架" };
+        for (int index = 0; index < titles.Length; index++)
+        {
+            bool undated = index == 3 || index == 5;
+            state.Items.Add(new TodoItem { Id = "unified-sample-" + index, Text = titles[index],
+                HasDeadline = !undated, HasTime = index == 0,
+                DueDate = undated ? DateTime.MinValue : index == 0 ? now.Date.AddHours(17) : now.Date.AddDays(index == 1 ? 1 : index == 2 ? 4 : 2),
+                CreatedAt = now.AddDays(-3), DeadlineSetAt = undated ? (DateTime?)null : now.AddDays(-3),
+                Priority = index == 0 || index == 2 ? TaskPriority.High : undated ? TaskPriority.Low : TaskPriority.Normal });
+        }
+        state.Items.Add(new TodoItem { Id = "unified-done", Text = "完成上周实验记录归档", HasDeadline = false,
+            IsCompleted = true, CreatedAt = now.AddDays(-5), CompletedAt = now.AddDays(-1) });
+        return state;
+    }
+
+    private static Border ButtonSurface(Button button)
+    {
+        button.ApplyTemplate();
+        Border surface = button.Template.FindName("Surface", button) as Border;
+        Assert(surface != null, "A panel action button has no rendered surface.");
+        return surface;
+    }
+
+    private static Color BrushColor(Brush brush)
+    {
+        SolidColorBrush solid = brush as SolidColorBrush;
+        Assert(solid != null, "Expected a theme-colored solid brush.");
+        return solid.Color;
+    }
+
+    private static void SetInputState(DependencyObject control, Type owner, string keyName, bool enabled)
+    {
+        FieldInfo field = owner.GetField(keyName, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+        Assert(field != null, "Missing test input-state key: " + keyName);
+        control.SetValue((DependencyPropertyKey)field.GetValue(null), enabled);
     }
 
     private static void ValidateAttentionTheme()
