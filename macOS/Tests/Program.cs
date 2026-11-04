@@ -48,6 +48,7 @@ namespace CornerTodo.MacTests
                 WindowsGoldenFixture(owned);
                 WindowsNoDeadlineFixture(owned);
                 WindowsRecurringFixture(owned);
+                WindowsDisplayPreferences(owned);
                 LegacyDatesAndLiteralNotes(owned);
                 int singleInstanceAssertions = SingleInstanceTests.Run(owned);
                 File.WriteAllText(Path.Combine(owned, "verification.json"), JsonSerializer.Serialize(new {
@@ -154,6 +155,8 @@ namespace CornerTodo.MacTests
                 "Reading the Windows fixture changed its scheduling origin.");
             Assert(state.Settings.EdgeAutoHide && state.Settings.AutoExpand && state.Settings.SortMode == TaskSortMode.Priority && state.Settings.CompletedCollapsed,
                 "Windows display preferences did not survive parsing.");
+            Assert(!state.Settings.AlwaysOnTop && !state.Settings.FloatingAutoExpand && state.Settings.EffectiveAutoExpand,
+                "An older Windows fixture enabled floating mode or changed the desktop expansion default.");
             Assert(state.Settings.Width == 430 && Math.Abs(state.Settings.Height - 475.33333333333326) < 0.0000001,
                 "Window geometry was rounded while loading.");
             var session = new TodoSession(store, state, false);
@@ -290,6 +293,48 @@ namespace CornerTodo.MacTests
             Assert(File.ReadAllText(file, Encoding.UTF8) == future && File.ReadAllText(file + ".bak", Encoding.UTF8) == backup &&
                 !Directory.GetFiles(directory, "*.corrupt-*").Any(),
                 "Rejecting a future schema changed the original file, its backup or its classification.");
+        }
+
+        private static void WindowsDisplayPreferences(string output)
+        {
+            string directory = Path.Combine(output, "windows-display-preferences");
+            DateTime now = new DateTime(2026, 11, 4, 14, 0, 0);
+            var state = new TodoState();
+            state.Settings.AlwaysOnTop = true;
+            state.Settings.AutoExpand = true;
+            state.Settings.FloatingAutoExpand = false;
+            state.Items.Add(new TodoItem { Id = "synthetic-display-item", Text = "跨平台显示设置兼容",
+                CreatedAt = now.AddDays(-2), DueDate = now.AddDays(-1), HasTime = true });
+            var store = new TodoStore(directory); store.Save(state);
+            var loaded = store.Load();
+            Assert(loaded.Version == 3 && loaded.Settings.AlwaysOnTop && loaded.Settings.AutoExpand &&
+                !loaded.Settings.FloatingAutoExpand && !loaded.Settings.EffectiveAutoExpand,
+                "The Mac store did not preserve independent Windows display preferences in schema three.");
+            Assert(TodoRules.Expansion(loaded, now) == 1,
+                "The shared urgency calculation was incorrectly gated by the Windows floating preference.");
+            var session = new TodoSession(store, loaded, false, () => now);
+            session.SaveGeometry(12, 24, 430, 475);
+            var geometry = store.Load();
+            Assert(geometry.Settings.AlwaysOnTop && geometry.Settings.AutoExpand && !geometry.Settings.FloatingAutoExpand,
+                "A Mac geometry save changed the preserved Windows display preferences.");
+            session.SetDesktopAutoExpand(false);
+            var off = store.Load();
+            Assert(off.Settings.AlwaysOnTop && !off.Settings.AutoExpand && !off.Settings.FloatingAutoExpand,
+                "The Mac desktop expansion command changed a Windows floating preference.");
+            session.SetDesktopAutoExpand(true);
+            var on = store.Load();
+            Assert(on.Settings.AlwaysOnTop && on.Settings.AutoExpand && !on.Settings.FloatingAutoExpand &&
+                !on.Settings.EffectiveAutoExpand && on.Items.Single().Text == state.Items.Single().Text,
+                "The Mac desktop expansion toggle did not persist independently or modified a task.");
+            using (JsonDocument json = JsonDocument.Parse(File.ReadAllText(store.DataFilePath, Encoding.UTF8))) {
+                JsonElement settings = json.RootElement.GetProperty("Settings");
+                Assert(json.RootElement.GetProperty("Version").GetInt32() == 3 &&
+                    settings.GetProperty("AlwaysOnTop").GetBoolean() &&
+                    !settings.GetProperty("FloatingAutoExpand").GetBoolean() &&
+                    settings.GetProperty("AutoExpand").GetBoolean() &&
+                    !settings.TryGetProperty("EffectiveAutoExpand", out _),
+                    "The Mac serializer omitted display settings or persisted a derived effective setting.");
+            }
         }
 
         private static void LegacyDatesAndLiteralNotes(string output)

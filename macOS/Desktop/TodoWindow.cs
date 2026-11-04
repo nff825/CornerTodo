@@ -403,7 +403,7 @@ public sealed class TodoWindow : Window
     private ContextMenu CreateMenu()
     {
         var panelToggle = Menu(state.Settings.Collapsed ? "展开面板" : "收起面板", ToggleCollapsed);
-        var automatic = Menu((state.Settings.AutoExpand ? "✓ " : "") + "随截止时间扩大", () => { if (Execute(() => session.SetAutoExpand(!state.Settings.AutoExpand))) ApplyGeometry(true); });
+        var automatic = Menu((state.Settings.AutoExpand ? "✓ " : "") + "随截止时间扩大", () => { if (Execute(() => session.SetDesktopAutoExpand(!state.Settings.AutoExpand))) ApplyGeometry(true); });
         var hiding = Menu((state.Settings.EdgeAutoHide ? "✓ " : "") + "贴边自动收起", ToggleEdgeMode);
         var menu = new ContextMenu { ItemsSource = new object[] {
             Menu("添加待办", () => Edit(null)), panelToggle, new Separator(),

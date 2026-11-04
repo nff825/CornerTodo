@@ -1,6 +1,6 @@
 # 开发工程说明
 
-当前 Windows 源码版本为 **1.6.0**。新增默认关闭的每日/每周/每月重复任务、按期生成、独立历史和规则管理；保留时刻点选、贴边收起、备注、时间进度与优先级排序。生产源码继续按职责归入 `src`，工程、配置与构建入口保留在根目录，任务规则与界面交互分别维护。
+当前 Windows 源码版本为 **1.7.0**。新增默认关闭的悬浮置顶、两种显示模式独立的自动扩大偏好，并统一操作区与滚动条的主题呈现；重复任务、无截止日期、时刻点选、贴边收起、备注、时间进度与优先级排序继续保留。生产源码按职责归入 `src`，工程、配置与构建入口保留在根目录。
 
 ## 工程与共享清单
 
@@ -29,14 +29,14 @@ docs/                   使用、开发与发布说明
 
 应用继续使用 .NET Framework 4.7.2、C# 5 和 AnyCPU。四个源码目录仍属于同一个应用项目、同一个程序集，命名空间保持 `CornerTodo`；本次不引入新的运行时依赖。
 
-26 个生产源码文件的归类如下，完整编译路径以根目录共享清单为准：
+生产源码按以下职责归类，完整文件列表与编译路径以根目录共享清单为准：
 
 | 目录 | 文件 |
 | --- | --- |
-| `src/App`（8） | `ApplicationComposition.cs`、`ApplicationController.cs`、`ApplicationInteraction.cs`、`AssemblyInfo.cs`、`Diagnostics.cs`、`LaunchOptions.cs`、`Program.cs`、`SingleInstanceSession.cs` |
-| `src/Tasks`（6） | `ITodoStore.cs`、`Models.cs`、`TaskDraft.cs`、`TodoSession.cs`、`TodoStateCopy.cs`、`TodoStore.cs` |
-| `src/UI`（9） | `AppearanceEditor.cs`、`AppearanceSettings.cs`、`GrowthLayout.cs`、`MainWindow.cs`、`PanelController.cs`、`TaskEditor.cs`、`TaskListView.cs`、`Theme.cs`、`TodoPanelView.cs` |
-| `src/Windows`（3） | `DesktopAttachmentController.cs`、`DesktopHost.cs`、`StartupManager.cs` |
+| `src/App` | `ApplicationComposition.cs`、`ApplicationController.cs`、`ApplicationInteraction.cs`、`AssemblyInfo.cs`、`Diagnostics.cs`、`LaunchOptions.cs`、`Program.cs`、`SingleInstanceSession.cs` |
+| `src/Tasks` | `ITodoStore.cs`、`Models.cs`、`RecurringTasks.cs`、`TaskDraft.cs`、`TodoSession.cs`、`TodoStateCopy.cs`、`TodoStore.cs` |
+| `src/UI` | `AppearanceEditor.cs`、`AppearanceSettings.cs`、`GrowthLayout.cs`、`MainWindow.cs`、`PanelController.cs`、`TaskEditor.cs`、`RecurringTasksWindow.cs`、`TaskListView.cs`、`Theme.cs`、`TodoPanelView.cs` |
+| `src/Windows` | `DesktopAttachmentController.cs`、`DesktopHost.cs`、`StartupManager.cs` |
 
 `CornerTodo.csproj` 与 PowerShell 脚本读取同一份 `CornerTodo.Build.props`。修改源码列表、框架引用、测试登记或公开文件白名单时，应在这份共享清单中维护，避免 IDE、脚本测试与发布包采用不同输入。
 
@@ -50,7 +50,7 @@ docs/                   使用、开发与发布说明
 | `SingleInstanceSession` | 保留按数据目录与预览模式区分的实例身份，管理命名互斥体及 Wake/Ack 通信，把恢复请求交给 UI 调度；不创建窗口，不管理待办 |
 | `ApplicationController` / `IApplicationWindow` | 管理当前主窗口、正常退出、句柄丢失后的延迟重建及排队恢复请求；通过窗口窄接口和可替换调度器测试，不直接实现原生桌面挂载 |
 | `ApplicationInteraction` | 跨替换窗口共享编辑状态、支持嵌套的模态作用域及退出请求；避免重建或退出打断仍在提交的编辑操作 |
-| `TaskEditor` / `TaskDraft` | 编辑器负责输入控件、小时／分钟点选、格式校验与日期映射，返回 `Text`、`Notes`、`Priority`、`DueDate`、`HasTime`；不生成任务 ID 或生命周期时间戳 |
+| `TaskEditor` / `TaskDraft` | 编辑器负责输入控件、小时／分钟点选、格式校验与日期映射，返回正文、备注、优先级、可选截止日期／时刻及重复草稿；不生成任务 ID 或生命周期时间戳 |
 | `MainWindow` | 连接视图、面板控制器、任务服务和挂载控制器，协调菜单、对话框及刷新；持有显示快照，通过 `Execute` 调用服务命令并展示错误，不自行修改或保存任务对象，也不重建主窗口 |
 | `TodoPanelView` / `TaskListView` | 构建面板、胶囊和事项控件树，应用配色、文案、字号与折叠呈现，并向窗口转发新增、编辑、完成及胶囊展开等操作意图；不保存数据，不决定窗口位置 |
 | `PanelPalette` | 根据外观设置提供面板、文字、按钮和勾选框的颜色及样式，不改变设置或任务状态 |
@@ -133,6 +133,18 @@ README 新增的三张展示图为实际 WPF 控件渲染，分别是 `docs/imag
 - MainWindow复用刷新周期和编辑/菜单保护，忙时不生成或弹对话框，退出后停止；漏期只做一次汇总提示，并保留菜单重试入口。规则管理与漏期对话框位于RecurringTasksWindow.cs。
 - CurrentVersion=3，读取旧1/2后内存迁移，不构造时写盘；未来版本保留原文件并报错。规则/游标/发生期均参与校验和深拷贝。
 - 新增独立Recurrence测试入口，重复UI测试并入View组；全部登记功能组为12组。Mac工程链接同一模型并验证v3保留，但没有接入周期生成和管理UI；旧Macalpha1包仍不可读取新格式。
+
+## v1.7.0 显示模式与视觉统一
+
+- `WidgetSettings.AlwaysOnTop` 默认 `false`，表示桌面模式；`FloatingAutoExpand` 默认 `false`，保存悬浮模式的自动扩大偏好。原 `AutoExpand` 继续表示桌面偏好，`EffectiveAutoExpand` 按当前模式选择实际值。
+- `TodoSession.SetAlwaysOnTop` 与按模式工作的 `SetAutoExpand` 沿用先保存、后提交。`SetDesktopAutoExpand` 供当前只实现桌面模式的Mac前端显式修改桌面偏好，避免导入的Windows悬浮开关改变Mac菜单语义。`TodoStateCopy` 和 `TodoStore` 显式复制／读写两个新字段；切换失败不提交偏好，窗口显示应恢复原模式。
+- `TodoRules.Expansion` 继续只计算任务紧迫程度，调用方依据当前平台／模式的扩大开关决定是否使用该进度；不把Windows显示模式判断混入共享日历规则。
+- 数据继续 Version 3：任务和重复规则的格式没有变化，新显示字段可缺省读取。v1.6.0 能读取任务，但再次保存会丢掉两个新显示字段；更早的不支持v3的程序不能作为回退读取器。
+- 进入悬浮时停用桌面挂载重试及事件，恢复原窗口样式／层级后置顶；返回桌面时撤销置顶并恢复挂载。现有 `DesktopHost` 管理的是顶层窗口，未使用 `SetParent/WS_CHILD`。模式切换、显式找回和销毁必须取消过期回调，避免后台重挂将悬浮拉回桌面。
+- 几何仍由 `PanelController` 管理，保存常态 `BaselineBounds`，不从扩张面板或胶囊临时大小反推；切换后按当前模式扩大偏好重新计算。胶囊在悬浮时保持可找到，编辑、菜单和拖动保护继续有效。
+- `PanelPalette` 提供操作区同系底色、描边与交互反馈，顶部与底部入口共用视觉规则。面板背景透明度不降低文字可读性；滚动条保留透明轨道、5DIP细滑块和14DIP操作宽度。
+- 新图 `docs/images/unified-panel.png` 与 `unified-dark-panel.png` 仅为合成数据的真实WPF离屏控件渲染，展示样式；原生置顶、Win+D、Explorer重启及多屏/DPI需另做实机检查。AI设计图不进入实际截图说明。
+- Mac 开发前端本次不新增悬浮UI；共享存储应保留Windows新字段。原Mac alpha.1附件仍保持旧版格式，不能读取v3，本次不重打包或覆盖它。
 
 ## 路径一：Windows PowerShell 脚本
 
@@ -218,11 +230,12 @@ msbuild .\CornerTodo.csproj /t:DescribeBuild
 
 ## 测试与调试数据
 
-共享清单目前登记十二组功能测试；v1.6.0新增Recurrence入口，View组包含重复编辑/管理的真实控件检查：
+功能测试入口以共享清单为准；Recurrence覆盖周期规则，显示模式与主题检查纳入相应桌面／生命周期及界面套件：
 
 ```powershell
 powershell -NoProfile -File .\tests\Run-StoreTests.ps1
 powershell -NoProfile -File .\tests\Run-SessionTests.ps1
+powershell -NoProfile -File .\tests\Run-RecurrenceTests.ps1
 powershell -NoProfile -File .\tests\Run-GrowthLayoutTests.ps1
 powershell -NoProfile -File .\tests\Run-PanelTests.ps1
 powershell -NoProfile -File .\tests\Run-ViewTests.ps1
@@ -263,12 +276,12 @@ IDE 中也可为调试会话设置 `--preview --windowed` 参数。若需要创�
 `Package.ps1` 仍负责从公开文件清单建立干净副本，在副本中构建、测试并生成本地便携包和源码包。源码包保留 `src/App`、`src/Tasks`、`src/UI`、`src/Windows` 的目录结构，工程文件、共享清单、共享脚本与开发说明一并保留；个人待办、日志、调试输出和本机自启动登记继续排除。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.6.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.7.0
 ```
 
-`Package.ps1` 验证 `VERSION` 后，默认将本版产物生成到 `release\v1.6.0`；显式 `-OutputDirectory` 仍可覆盖为其他项目内目录。同一输出位置再次打包时，上一批源码目录、ZIP、摘要和报告会保存在 `archive/packages/v版本号/previous-bundles-*`，供本地回退使用；待办备份应通过原 `Data` 单独保留。
+`Package.ps1` 验证 `VERSION` 后，默认将本版产物生成到 `release\v1.7.0`；显式 `-OutputDirectory` 仍可覆盖为其他项目内目录。同一输出位置再次打包时，上一批源码目录、ZIP、摘要和报告会保存在 `archive/packages/v版本号/previous-bundles-*`，供本地回退使用；待办备份应通过原 `Data` 单独保留。
 
-这不是开发日常构建的必要步骤，也不会替用户创建仓库、上传附件或发布 GitHub Release。上传本次完整干净源码并核对测试结果后，再创建指向本次提交的 `v1.6.0` 标签，保留已有 `v1.5.0` 及更早版本的 Release 和标签。从 v1.5.0 仓库升级沿用原目录，不需要清理旧根目录源码。
+这不是开发日常构建的必要步骤，也不会替用户创建仓库、上传附件或发布 GitHub Release。上传本次完整干净源码并核对测试结果后，再创建指向本次提交的 `v1.7.0` 标签，保留已有 `v1.6.0` 及更早版本的 Release 和标签。从 v1.6.0 仓库升级沿用原目录，不需要清理旧根目录源码。
 
 发布前运行全部测试，并以本次 `PACKAGE-REPORT.txt`、测试日志和文件摘要为核对依据；没有完成的检查不得写成已通过。打包成功不等于已经完成原生桌面实机试用，也不代表已经发布到 GitHub。
 
