@@ -146,6 +146,8 @@
     <CornerTodoPublicFile Include="docs/images/reminder-editor.png" />
     <CornerTodoPublicFile Include="docs/images/reminder-card.png" />
     <CornerTodoPublicFile Include="docs/images/deadline-calendar.png" />
+    <CornerTodoPublicFile Include="docs/images/text-scale-editor.png" />
+    <CornerTodoPublicFile Include="docs/images/text-scale-panel.png" />
     <!-- Keep linked task rules and Mac development UI in the same public source snapshot. -->
     <CornerTodoPublicFile Include="macOS/VERSION" />
     <CornerTodoPublicFile Include="macOS/README.md" />

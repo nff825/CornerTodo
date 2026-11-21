@@ -2,9 +2,15 @@
 
 放在 Windows 桌面右上角的本地待办工具。用一句话记录要做的事，按需选择截止日期，完成后勾选归档。可定制颜色与透明度，默认在桌面显示，也可自行开启悬浮置顶，在其他办公窗口上方查看待办。
 
-当前 Windows 源码版本为 **v1.9.0**。另有独立的 Mac 实验性内测版，可下载文件以本仓库的 **Releases** 页面为准。
+当前 Windows 源码版本为 **v1.10.0**。另有独立的 Mac 实验性内测版，可下载文件以本仓库的 **Releases** 页面为准。
 
-Windows v1.9.0 新增[截止日历](#截止日历)，从桌面面板的「⋯」菜单打开，可按月查看截止事项，点选日期后编辑或完成当天的待办。详细变更及开发说明见 [更新记录](CHANGELOG.md) 和 [架构与构建说明](docs/DEVELOPMENT.md)。
+Windows v1.10.0 可在「⋯ → 外观设置」中调节文字大小，范围为 90%～150%，默认 100%。拖动滑块可实时预览主面板与截止日历的文字，保存后保留。详细变更及开发说明见 [更新记录](CHANGELOG.md) 和 [架构与构建说明](docs/DEVELOPMENT.md)。
+
+| 文字大小设置 | 125% 的待办清单 |
+| :---: | :---: |
+| [<img src="docs/images/text-scale-editor.png" width="340" alt="实际控件离屏渲染：文字大小滑块与恢复100%">](docs/images/text-scale-editor.png) | [<img src="docs/images/text-scale-panel.png" width="300" alt="实际控件离屏渲染：125%正文、日期与临期逾期层级">](docs/images/text-scale-panel.png) |
+
+图片使用示例事项和实际 WPF 控件离屏渲染。
 
 ## v1.8.0 到期提醒
 
@@ -72,7 +78,7 @@ Mac 包由 Windows 交叉构建，原生启动、菜单栏、Spaces、全屏、�
 
 - 无边框、半透明的面板，默认在桌面右上角，可自行开启悬浮置顶并保存选择。
 - 顶部操作区与「添加待办」统一底色、圆角和交互反馈，配合浅色、深色及自定义外观。
-- 外观设置：调整背景透明度、背景色和主要／次要文字颜色，提供浅色、深色和原版预设，实时预览后选择保存或取消。
+- 外观设置支持文字大小 90%～150%、背景透明度、背景色和主要／次要文字颜色，提供浅色、深色和原版预设，实时预览后选择保存或取消。
 - 重复任务默认关闭，按需设置每日、每周多选星期或每月几号／月底，开始日期独立于截止日期；每一期独立记录，不因完成晚了而改变后续计划。
 - 输入完整事项，可不设置截止日期；需要时再选择日期与具体时刻，小时／分钟分别点选或键盘输入，句子中的人物和时间无需拆成字段。
 - 「未完成／已完成」两种状态。勾选后移入已完成区域并划线，取消勾选可恢复。
@@ -88,9 +94,9 @@ Mac 包由 Windows 交叉构建，原生启动、菜单栏、Spaces、全屏、�
 
 ## 下载与运行
 
-Windows 便携包名为 `CornerTodo-v1.9.0-windows-portable.zip`，可下载版本以仓库的 **Releases** 为准。完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
+Windows 便携包名为 `CornerTodo-v1.10.0-windows-portable.zip`，可下载版本以仓库的 **Releases** 为准。完整解压到可写目录，再双击 `CornerTodo.exe`。程序不需要安装。再次启动同一份程序会展开已有面板并移回右上角；退出请使用面板「⋯」菜单中的「退出待办」。
 
-`CornerTodo-v1.9.0-source.zip` 是源码包，含 Windows 工程与 Mac 开发分支，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用 Windows 程序请选择名称含 `windows-portable` 的压缩包。
+`CornerTodo-v1.10.0-source.zip` 是源码包，含 Windows 工程与 Mac 开发分支，供阅读和构建。GitHub 自动生成的 `Source code` 压缩包也是源码快照。直接使用 Windows 程序请选择名称含 `windows-portable` 的压缩包。
 
 系统目标为 **Windows 10 / 11，.NET Framework 4.7.2 或更新版本**。应用使用 C# / WPF 与 Windows 自带的框架库，没有第三方运行时依赖。桌面层显示会受到 Explorer、其他桌面工具、多显示器和缩放配置的影响，尚未保证所有环境组合的兼容性；无法连接桌面层时会提示并以普通窗口显示。
 
@@ -109,7 +115,7 @@ Windows 便携包名为 `CornerTodo-v1.9.0-windows-portable.zip`，可下载版�
 
 ## 截止日历
 
-从 Windows 面板「⋯ → 截止日历…」打开独立窗口，使用左右箭头翻月，点击「今天」回到当前日期。事项按本地截止日期归入月格，每格最多显示两条标题，另以 `+N` 标出其余条数。点击日期可查看该日全部可见事项，并直接编辑或标记完成。
+v1.9.0 新增截止日历。从 Windows 面板「⋯ → 截止日历…」打开独立窗口，使用左右箭头翻月，点击「今天」回到当前日期。事项按本地截止日期归入月格，每格最多显示两条标题，另以 `+N` 标出其余条数。点击日期可查看该日全部可见事项，并直接编辑或标记完成。
 
 默认隐藏已完成事项。勾选「显示已完成」可查看或恢复这些事项。「逾期」与「未设截止」可单独查看，已生成的重复期次也按其截止日期或未设截止状态呈现。
 
@@ -163,7 +169,11 @@ Windows 便携包名为 `CornerTodo-v1.9.0-windows-portable.zip`，可下载版�
 
 可分别选择背景色、主要文字色与次要文字色，使用颜色选择器或填写 `#RRGGBB` 色值；也可选择浅色、深色或恢复原版外观。调整会实时预览，点击「保存」才会写入本地设置；取消或关闭设置窗口会恢复已保存的外观。预设选择同样遵循预览与保存规则。
 
-紧急与逾期提示保留状态配色。顶部操作区和「添加待办」采用一致的主题底色、圆角、描边及交互反馈，背景全透明时仍保留可辨认的操作入口；如果配色不易辨认，可在「⋯」菜单选择「恢复清晰浅色」，直接恢复并保存默认外观。
+「文字大小」可在 90%～150% 之间调整，默认 100%。拖动滑块时，主面板的事项正文、日期与已完成事项文字实时变化，临期和逾期事项保留相对字号层级。截止日历中的事项文字与日期也跟随预览，文字换行和滚动区域随大小适配。
+
+「恢复100%」只将文字大小恢复为 100%。切换浅色、深色和原版颜色预设会保留当前字号；窗口底部的「恢复默认」将颜色、透明度和字号一起恢复为清晰浅色与 100%，点击「保存」后生效。
+
+紧急与逾期提示保留状态配色。顶部操作区和「添加待办」采用一致的主题底色、圆角、描边及交互反馈，背景全透明时仍保留可辨认的操作入口。如果配色不易辨认，可在「⋯」菜单选择「恢复清晰浅色」，直接恢复并保存浅色配色，保留当前文字大小。
 
 新数据默认使用清晰浅色；旧版数据缺少外观设置时自动沿用原版外观。外观设置与待办数据一起保存在本地，修改外观不会改变事项、截止时间或保存的常态尺寸。
 
@@ -230,7 +240,7 @@ Windows 便携包名为 `CornerTodo-v1.9.0-windows-portable.zip`，可下载版�
 
 v1.4.0 及更早的旧事项、截止日期与已有设置继续读取。旧数据缺少贴边字段时默认关闭；缺少备注、优先级或排序字段时采用空备注、中优先级和截止时间优先。升级前先退出旧程序并单独备份整个 `Data`，再替换程序文件、保留原数据。
 
-v1.9.0 沿用 v1.8.0 的 Version 4 数据格式，保存提醒计划、处理状态及提前生成的重复期次。旧 Version 1／2／3 载入后只在内存迁移，首次成功保存才写新版；旧事项默认关闭提醒，原有日期、重复规则和显示设置保留。未知版本保留原文件并明确报错。**v1.7.0 及更早的 Windows 程序、已发布 Mac 0.1.0-alpha.1 不能读取 Version 4。回退到这些版本前，请先恢复升级前单独保存的整个 Data 备份。** `todos.json.bak` 是滚动保存备份，不能代替升级前备份。
+v1.10.0 沿用 v1.8.0／v1.9.0 的 Version 4 数据格式，增加可选的文字大小设置。旧数据缺少该设置时使用 100%。提醒计划、处理状态及提前生成的重复期次继续保存。旧 Version 1／2／3 载入后只在内存迁移，首次成功保存才写新版；旧事项默认关闭提醒，原有日期、重复规则和显示设置保留。未知版本保留原文件并明确报错。**v1.7.0 及更早的 Windows 程序、已发布 Mac 0.1.0-alpha.1 不能读取 Version 4。回退到这些版本前，请先恢复升级前单独保存的整个 Data 备份。** `todos.json.bak` 是滚动保存备份，不能代替升级前备份。
 
 当前 Windows 功能面向本机使用，不包含手机端、跨设备同步、声音或系统后台通知、附件、富文本或子任务；Mac 内测独立分发。
 
@@ -248,7 +258,7 @@ v1.9.0 沿用 v1.8.0 的 Version 4 数据格式，保存提醒计划、处理状
 | `archive/packages` | 历次打包结果和回退存档 |
 | `output` 下其他目录 | 测试记录、界面渲染和验证产物 |
 
-`release/v1.9.0` 是本版的打包输出目录，内部文件保留 `CornerTodo-v1.9.0-…` 完整名称。重复打包时，上一批文件会存入 `archive/packages/v版本号/previous-bundles-*`。待办数据备份仍在对应的 `Data` 内。`dist`、`release`、`archive` 和开发输出均留在本机。
+`release/v1.10.0` 是本版的打包输出目录，内部文件保留 `CornerTodo-v1.10.0-…` 完整名称。重复打包时，上一批文件会存入 `archive/packages/v版本号/previous-bundles-*`。待办数据备份仍在对应的 `Data` 内。`dist`、`release`、`archive` 和开发输出均留在本机。
 
 ## 从源码构建
 
@@ -283,7 +293,7 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory output\dev
 | 面板交互控制器（Panel） | `powershell -NoProfile -File .\tests\Run-PanelTests.ps1` | 假屏幕宿主、可控时钟下的拖动、增长动画、贴边延迟收起／恢复及基准尺寸；不挂载桌面 |
 | 视图（View） | `powershell -NoProfile -File .\tests\Run-ViewTests.ps1` | 面板控件树、胶囊计数、时刻点选和校验、事项呈现及操作意图转发，以及截止日历分组和界面 |
 | WPF 离屏界面 | `powershell -NoProfile -File .\tests\Run-OffscreenUiTests.ps1` | 示例界面布局与渲染，结果写入 `tests\visual-qa` |
-| 外观设置界面 | `powershell -NoProfile -File .\tests\Run-AppearanceUiTests.ps1` | 背景透明度、主题预览／保存／回滚、编辑器交互，结果写入 `tests\appearance-qa` |
+| 外观设置界面 | `powershell -NoProfile -File .\tests\Run-AppearanceUiTests.ps1` | 背景透明度、文字大小、主题预览／保存／回滚、编辑器交互，结果写入 `tests\appearance-qa` |
 | 登录自启动 | `powershell -NoProfile -File .\tests\Run-StartupTests.ps1` | 登录参数、受管快捷方式登记／关闭／更新及菜单行为，使用隔离测试环境 |
 | 单实例通信（Instance） | `powershell -NoProfile -File .\tests\Run-InstanceTests.ps1` | 独立命名空间内的实例身份、手动唤醒、自动重复静默及释放，不启动正式应用 |
 | 桌面挂载调度（Desktop） | `powershell -NoProfile -File .\tests\Run-DesktopTests.ps1` | 假桌面适配器下的首次挂载、重试、句柄丢失及关闭后的回调清理 |
@@ -310,16 +320,16 @@ powershell -NoProfile -File .\Build.ps1 -Test -OutputDirectory output\dev
 维护者可运行下面的命令。脚本会从公开源码清单建立干净副本，在副本中构建并运行现有测试，再将新程序打包；不会从日常 `dist` 目录复制个人数据。
 
 ```powershell
-powershell -NoProfile -File .\Package.ps1 -Version 1.9.0
+powershell -NoProfile -File .\Package.ps1 -Version 1.10.0
 ```
 
-默认按 `VERSION` 输出到对应的 `release\v版本号`，本版输出目录为 `release\v1.9.0`。可使用 `-OutputDirectory` 指定其他项目内目录。产物包括：
+默认按 `VERSION` 输出到对应的 `release\v版本号`，本版输出目录为 `release\v1.10.0`。可使用 `-OutputDirectory` 指定其他项目内目录。产物包括：
 
-- `CornerTodo-v1.9.0-source.zip`
-- `CornerTodo-v1.9.0-windows-portable.zip`
+- `CornerTodo-v1.10.0-source.zip`
+- `CornerTodo-v1.10.0-windows-portable.zip`
 - `SHA256SUMS.txt`
 
-`release\v1.9.0\CornerTodo-v1.9.0-source` 是包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。从 v1.8.0 仓库更新时沿用现有目录结构。确认源码更新完整后，再创建 v1.9.0 标签，并保留 v1.8.0 及更早的 Release 和标签。发布前运行全部测试，并核对本次 `PACKAGE-REPORT.txt` 与文件摘要。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
+`release\v1.10.0\CornerTodo-v1.10.0-source` 是包含 `src`、工程与构建入口的干净源码展开目录，可将其中的内容上传到 GitHub。从 v1.9.0 仓库更新时沿用现有目录结构。确认源码更新完整后，再创建 v1.10.0 标签，并保留 v1.9.0 及更早的 Release 和标签。发布前运行全部测试，并核对本次 `PACKAGE-REPORT.txt` 与文件摘要。完整的网页操作步骤见 [发布说明](docs/PUBLISHING.md)。
 
 ## 许可证
 
