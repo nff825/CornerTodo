@@ -36,6 +36,7 @@ namespace CornerTodo
         private DispatcherOperation recurrenceOperation;
         private bool missedRecurrencesOffered;
         private Window activeDialog;
+        private DeadlineCalendarWindow deadlineCalendar;
         private const string DesktopPendingMessage = "暂时无法连接桌面层。当前以普通窗口显示。";
         public bool HostLost { get; set; }
         public event EventHandler HandleLost;
@@ -100,8 +101,10 @@ namespace CornerTodo
                 if (dateStamp != DateTime.Now.ToString("yyyyMMddHHmmss")) {
                     if (InteractionBlocked) {
                         deferredRender = true;
-                        panel.UpdateHeader(this.state, DateTime.Now, preview);
-                        panel.UpdateTimes(DateTime.Now);
+                        DateTime now = DateTime.Now;
+                        panel.UpdateHeader(this.state, now, preview);
+                        panel.UpdateTimes(now);
+                        RefreshDeadlineCalendar(now);
                     }
                     else { ProcessRecurrences(false); Render(); }
                 }
@@ -160,6 +163,7 @@ namespace CornerTodo
         {
             if (disposed) return;
             disposed = true;
+            if (deadlineCalendar != null) deadlineCalendar.Close();
             reminders.Dispose();
             Loaded -= LoadedWindow; Closed -= ClosedWindow;
             desktopAttachment.HandleLost -= DesktopHandleLost;
@@ -188,6 +192,7 @@ namespace CornerTodo
             panel.Render(state, now, preview, appearancePreview);
             Foreground = panel.Palette.Ink;
             UpdateExpansion(false, false);
+            RefreshDeadlineCalendar(now);
             if (reminders != null) reminders.Refresh();
         }
 
@@ -196,7 +201,12 @@ namespace CornerTodo
             if (disposed || HostLost) return;
             state = session.Snapshot(); deferredRender = true;
             if (!InteractionBlocked) Render();
-            else { panel.UpdateHeader(state, DateTime.Now, preview); panel.UpdateTimes(DateTime.Now); }
+            else {
+                DateTime now = DateTime.Now;
+                panel.UpdateHeader(state, now, preview);
+                panel.UpdateTimes(now);
+                RefreshDeadlineCalendar(now);
+            }
         }
 
         private void ShowMenu()
@@ -263,6 +273,8 @@ namespace CornerTodo
                 RefreshStartupMenu(loginStartup, repairStartup);
             };
             var create = new MenuItem { Header = "添加待办" }; create.Click += delegate { Edit(null); }; menu.Items.Add(create);
+            var calendar = new MenuItem { Header = "截止日历…", Tag = "deadline-calendar" };
+            calendar.Click += delegate { OpenDeadlineCalendar(); }; menu.Items.Add(calendar);
             var recurring = new MenuItem { Header = "管理重复任务…", Tag = "recurring-management" };
             recurring.Click += delegate { ManageRecurringTasks(); }; menu.Items.Add(recurring);
             var catchUp = new MenuItem { Header = "处理遗漏周期…", Tag = "recurring-catch-up" };
@@ -355,7 +367,44 @@ namespace CornerTodo
 
         private void Edit(TodoItem item) { EditTask(item, false); }
 
-        private void EditTask(TodoItem item, bool focusNotes)
+        private void OpenDeadlineCalendar()
+        {
+            if (disposed || HostLost || applicationInteraction.IsBusy) return;
+            if (deadlineCalendar != null) {
+                RefreshDeadlineCalendar(DateTime.Now);
+                if (deadlineCalendar.WindowState == WindowState.Minimized) deadlineCalendar.WindowState = WindowState.Normal;
+                deadlineCalendar.Activate();
+                return;
+            }
+
+            var calendar = new DeadlineCalendarWindow(state, DateTime.Now, EditFromDeadlineCalendar,
+                delegate(TodoItem item, bool completed) {
+                    if (disposed || HostLost || applicationInteraction.IsBusy) return false;
+                    return Execute(delegate { session.SetCompleted(item.Id, completed); }, "完成状态未保存。", true);
+                });
+            Rect area = DesktopHost.WorkArea(this);
+            FitWindowToWorkArea(calendar, area);
+            calendar.WindowStartupLocation = WindowStartupLocation.Manual;
+            calendar.Left = area.Left + (area.Width - calendar.Width) / 2;
+            calendar.Top = area.Top + (area.Height - calendar.Height) / 2;
+            calendar.Closed += delegate { deadlineCalendar = null; };
+            deadlineCalendar = calendar;
+            calendar.Show();
+        }
+
+        private void EditFromDeadlineCalendar(TodoItem item)
+        {
+            if (disposed || HostLost || deadlineCalendar == null) return;
+            TodoItem current = state.Items.FirstOrDefault(candidate => candidate.Id == item.Id);
+            if (current != null) EditTask(current, false, deadlineCalendar);
+        }
+
+        private void RefreshDeadlineCalendar(DateTime now)
+        {
+            if (deadlineCalendar != null) deadlineCalendar.Refresh(state, now);
+        }
+
+        private void EditTask(TodoItem item, bool focusNotes, Window parent = null)
         {
             if (disposed || applicationInteraction.IsBusy) return;
             applicationInteraction.EditorOpen = true; interaction.StopAnimation();
@@ -373,18 +422,16 @@ namespace CornerTodo
                     return saved;
                 });
                 editor.SaveErrorProvider = delegate { return panel.StatusText.Text; };
-                Rect area = DesktopHost.WorkArea(this);
-                editor.MinWidth = Math.Min(editor.MinWidth, Math.Max(1, area.Width - 24));
-                editor.MinHeight = Math.Min(editor.MinHeight, Math.Max(1, area.Height - 24));
-                editor.MaxWidth = Math.Max(editor.MinWidth, area.Width - 24);
-                editor.MaxHeight = Math.Max(editor.MinHeight, area.Height - 24);
-                editor.Width = Math.Min(editor.Width, editor.MaxWidth);
-                editor.Height = Math.Min(editor.Height, editor.MaxHeight);
-                editor.WindowStartupLocation = WindowStartupLocation.Manual;
-                editor.Left = Math.Max(area.Left + 12, area.Right - editor.Width - 26);
-                editor.Top = Math.Max(area.Top + 20, Math.Min(DesktopHost.GetBounds(this).Top + 55, area.Bottom - editor.Height - 20));
-                LimitChildHeightAtPosition(editor, area);
-                if (ShowChildDialog(editor) == true)
+                Rect area = DesktopHost.WorkArea(parent ?? this);
+                FitWindowToWorkArea(editor, area);
+                if (parent == null) {
+                    editor.WindowStartupLocation = WindowStartupLocation.Manual;
+                    editor.Left = Math.Max(area.Left + 12, area.Right - editor.Width - 26);
+                    editor.Top = Math.Max(area.Top + 20, Math.Min(DesktopHost.GetBounds(this).Top + 55, area.Bottom - editor.Height - 20));
+                    LimitChildHeightAtPosition(editor, area);
+                }
+                else editor.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                if (ShowChildDialog(editor, parent) == true)
                 {
                     if (savedRecurrence) ShowStatus(futureOnly ? "重复规则已保存，将按开始日期生成；可在“管理重复任务”查看。" : "重复规则已保存，已有事项与完成历史保留。");
                     else panel.StatusText.Visibility = Visibility.Collapsed;
@@ -397,14 +444,21 @@ namespace CornerTodo
         private void FitRecurringWindow(Window child)
         {
             Rect area = DesktopHost.WorkArea(this);
-            child.MinWidth = Math.Min(child.MinWidth, Math.Max(1, area.Width - 24));
-            child.MinHeight = Math.Min(child.MinHeight, Math.Max(1, area.Height - 24));
-            child.MaxWidth = Math.Max(child.MinWidth, area.Width - 24); child.MaxHeight = Math.Max(child.MinHeight, area.Height - 24);
-            child.Width = Math.Min(child.Width, child.MaxWidth); child.Height = Math.Min(child.Height, child.MaxHeight);
+            FitWindowToWorkArea(child, area);
             child.WindowStartupLocation = WindowStartupLocation.Manual;
             child.Left = Math.Max(area.Left + 12, area.Right - child.Width - 26);
             child.Top = Math.Max(area.Top + 12, Math.Min(DesktopHost.GetBounds(this).Top + 35, area.Bottom - child.Height - 12));
             LimitChildHeightAtPosition(child, area);
+        }
+
+        private static void FitWindowToWorkArea(Window child, Rect area)
+        {
+            double maxWidth = Math.Max(1, area.Width - 24);
+            double maxHeight = Math.Max(1, area.Height - 24);
+            child.MinWidth = Math.Min(child.MinWidth, maxWidth);
+            child.MinHeight = Math.Min(child.MinHeight, maxHeight);
+            child.MaxWidth = maxWidth; child.MaxHeight = maxHeight;
+            child.Width = Math.Min(child.Width, maxWidth); child.Height = Math.Min(child.Height, maxHeight);
         }
 
         internal static void LimitChildHeightAtPosition(Window child, Rect workArea)
@@ -651,17 +705,17 @@ namespace CornerTodo
             finally { dialogOpen = false; ResumeAttention(); }
         }
 
-        internal void PrepareChildWindow(Window child)
+        internal void PrepareChildWindow(Window child, Window parent = null)
         {
             if (child == null) throw new ArgumentNullException("child");
-            Window owner = activeDialog ?? this;
+            Window owner = parent ?? activeDialog ?? this;
             if (owner.IsVisible) child.Owner = owner;
-            child.Topmost = state.Settings.AlwaysOnTop;
+            child.Topmost = parent == null ? state.Settings.AlwaysOnTop : parent.Topmost;
         }
 
-        private bool? ShowChildDialog(Window child)
+        private bool? ShowChildDialog(Window child, Window parent = null)
         {
-            PrepareChildWindow(child);
+            PrepareChildWindow(child, parent);
             if (reminders != null) reminders.Refresh();
             Window previous = activeDialog;
             activeDialog = child;

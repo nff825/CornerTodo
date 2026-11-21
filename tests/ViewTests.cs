@@ -22,7 +22,7 @@ internal static class ViewTests
     private static int groups;
 
     [STAThread]
-    public static int Main()
+    public static int Main(string[] args)
     {
         Application application = null;
         try
@@ -44,8 +44,10 @@ internal static class ViewTests
             TaskEditorTests.Run();
             RecurringUiTests.Run();
             ReminderEditorTests.Run();
+            DeadlineCalendarTests.Run();
+            DeadlineCalendarUiTests.Run(args.Length == 0 ? null : args[0]);
             Console.WriteLine("PASS: " + groups + " view behavior groups, " + checks + " checks.");
-            Console.WriteLine("Real control trees and unshown editors; no Window.Show, store, session, Data or startup registration is used.");
+            Console.WriteLine("Real control trees and unshown windows; no Window.Show, store, session, Data or startup registration is used.");
             Console.WriteLine("Native double-click input still needs interactive verification; this test does not set nonpublic MouseButtonEventArgs state.");
             return 0;
         }
