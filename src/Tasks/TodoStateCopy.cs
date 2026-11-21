@@ -20,7 +20,8 @@ namespace CornerTodo
                     Collapsed = settings.Collapsed, CompletedCollapsed = settings.CompletedCollapsed,
                     AutoExpand = settings.AutoExpand, EdgeAutoHide = settings.EdgeAutoHide,
                     AlwaysOnTop = settings.AlwaysOnTop, FloatingAutoExpand = settings.FloatingAutoExpand,
-                    Appearance = AppearanceSettings.Normalize(settings.Appearance), SortMode = settings.SortMode
+                    Appearance = AppearanceSettings.Normalize(settings.Appearance), SortMode = settings.SortMode,
+                    QuadrantUrgentHours = settings.QuadrantUrgentHours
                 }
             };
         }
@@ -29,7 +30,8 @@ namespace CornerTodo
         {
             if (item == null) throw new ArgumentNullException("item");
             return new TodoItem {
-                Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsCompleted = item.IsCompleted,
+                Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsImportant = item.IsImportant,
+                IsCompleted = item.IsCompleted,
                 CreatedAt = item.CreatedAt, CompletedAt = item.CompletedAt,
                 DueDate = item.DueDate, HasDeadline = item.HasDeadline, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt,
                 RecurringRuleId = item.RecurringRuleId, OccurrenceDate = item.OccurrenceDate, RepeatLabel = item.RepeatLabel,

@@ -16,6 +16,7 @@ namespace CornerTodo
         public string Text { get; set; }
         public string Notes { get; set; }
         public TaskPriority Priority { get; set; }
+        public bool IsImportant { get; set; }
         public bool IsCompleted { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
@@ -45,6 +46,7 @@ namespace CornerTodo
             EdgeAutoHide = false;
             Appearance = AppearanceSettings.CreateLight();
             SortMode = TaskSortMode.Deadline;
+            QuadrantUrgentHours = QuadrantRules.DefaultUrgentHours;
         }
 
         public double? Left { get; set; }
@@ -60,11 +62,12 @@ namespace CornerTodo
         public bool EdgeAutoHide { get; set; }
         public AppearanceSettings Appearance { get; set; }
         public TaskSortMode SortMode { get; set; }
+        public int QuadrantUrgentHours { get; set; }
     }
 
     public sealed class TodoState
     {
-        public const int CurrentVersion = 4;
+        public const int CurrentVersion = 5;
 
         public TodoState()
         {

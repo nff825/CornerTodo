@@ -22,6 +22,7 @@ internal static class RecurrenceTests
             Run("Large calendar ranges are counted arithmetically and extrema terminate", ExtremeRanges);
             Run("Future starts save only a rule and first launch generation is exact-once", FutureStart);
             Run("Each period is independent of previous completion and snapshot labels", IndependentPeriods);
+            Run("Important rules, instance edits and future edits preserve reminders and existing history", ImportanceTemplates);
             Run("Deleted occurrences and clock rollback cannot regenerate a processed period", DeletedAndClockRollback);
             Run("No-deadline repeats stay out of attention and deadline repeats preserve offsets", DeadlineTemplates);
             Run("Missed periods require an explicit choice while unaffected rules can run", MissedDeferral);
@@ -74,6 +75,61 @@ internal static class RecurrenceTests
         Assert(s.Snapshot().RecurringRules.Count == 0 && s.Snapshot().Items.Single().RecurringRuleId == null, "Default created a repeat.");
         Assert(s.GenerateCurrentRecurrences() == 0 && s.GetRecurrenceSummary().TotalCount == 0, "Ordinary tasks entered scheduler.");
     }
+    private static void ImportanceTemplates()
+    {
+        var writer = new Writer();
+        TodoSession session = Session(writer);
+        TaskDraft template = Draft(Options(RecurrenceFrequency.Daily));
+        template.HasDeadline = true; template.HasTime = true; template.DueDate = Epoch.Date.AddHours(18);
+        template.IsImportant = true; template.Priority = TaskPriority.Low;
+        template.ReminderEnabled = true; template.ReminderMinutesBefore = 15;
+        TodoItem first = session.Add(template);
+        string ruleId = Id(session);
+        Assert(first.IsImportant && OnlyRule(session).IsImportant && first.Priority == TaskPriority.Low,
+            "A repeated occurrence did not inherit independent importance.");
+        TodoState exposed = session.Snapshot();
+        exposed.Items[0].IsImportant = false; exposed.RecurringRules[0].IsImportant = false;
+        RecurringTaskRule exposedRule = session.GetRecurringRule(ruleId); exposedRule.IsImportant = false;
+        Assert(session.Snapshot().Items[0].IsImportant && OnlyRule(session).IsImportant, "Importance leaked through a recurrence snapshot.");
+        clock = clock.AddHours(1);
+        var instance = new TaskDraft { Text = first.Text, Notes = first.Notes, Priority = first.Priority,
+            HasDeadline = first.HasDeadline, HasTime = first.HasTime, DueDate = first.DueDate,
+            IsImportant = false, ReminderEnabled = first.ReminderEnabled, ReminderMinutesBefore = first.ReminderMinutesBefore };
+        session.Edit(first.Id, instance);
+        TodoItem edited = session.Snapshot().Items.Single();
+        Assert(!edited.IsImportant && OnlyRule(session).IsImportant && edited.DeadlineSetAt == first.DeadlineSetAt &&
+            edited.ReminderPlanId == first.ReminderPlanId && edited.ReminderSetAt == first.ReminderSetAt,
+            "Editing instance importance changed the template, scheduling epoch or reminder plan.");
+
+        DateTime? originalReminderSetAt = OnlyRule(session).ReminderSetAt;
+        template.IsImportant = false;
+        session.EditRecurringRule(ruleId, template);
+        Assert(!OnlyRule(session).IsImportant && OnlyRule(session).ReminderSetAt == originalReminderSetAt &&
+            session.Snapshot().Items.Single().ReminderPlanId == first.ReminderPlanId,
+            "Importance-only future edit reset a reminder or modified an existing period.");
+        clock = Epoch.AddDays(1);
+        Assert(session.GenerateCurrentRecurrences() == 1 && !session.Snapshot().Items.Last().IsImportant,
+            "The next occurrence ignored the saved future importance.");
+        template.IsImportant = true;
+        writer.Fail = true;
+        Throws<IOException>(delegate { session.EditRecurringRule(ruleId, template); });
+        Assert(!OnlyRule(session).IsImportant && session.Snapshot().Items.Count == 2 &&
+            OnlyRule(session).ReminderSetAt == originalReminderSetAt, "Failed importance edit partially committed a repeated rule.");
+        writer.Fail = false;
+        session.EditRecurringRule(ruleId, template);
+        Assert(OnlyRule(session).IsImportant && OnlyRule(session).ReminderSetAt == originalReminderSetAt,
+            "Retry lost the importance change or reset the rule reminder.");
+        clock = Epoch.AddDays(2);
+        Assert(session.GenerateCurrentRecurrences() == 1 && session.Snapshot().Items.Last().IsImportant &&
+            session.Snapshot().Items.Take(2).All(item => !item.IsImportant), "Future importance rewrote existing occurrence history.");
+        var store = new TodoStore(Path.Combine(root, "important-periods"));
+        store.Save(session.Snapshot());
+        TodoState loaded = store.Load();
+        Assert(loaded.Version == 5 && loaded.RecurringRules.Single().IsImportant &&
+            loaded.Items.Select(item => item.IsImportant).SequenceEqual(new[] { false, false, true }),
+            "Repeated importance did not survive real persistence.");
+    }
+
     private static void Weekly()
     {
         RecurrenceOptions o = Options(RecurrenceFrequency.Weekly); RecurringTaskRule r = Rule(o);

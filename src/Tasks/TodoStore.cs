@@ -153,7 +153,8 @@ namespace CornerTodo
             {
                 items.Add(new Dictionary<string, object>
                 {
-                    { "Id", item.Id }, { "Text", item.Text }, { "Notes", item.Notes ?? "" }, { "Priority", (int)item.Priority }, { "IsCompleted", item.IsCompleted },
+                    { "Id", item.Id }, { "Text", item.Text }, { "Notes", item.Notes ?? "" }, { "Priority", (int)item.Priority },
+                    { "IsImportant", item.IsImportant }, { "IsCompleted", item.IsCompleted },
                     { "CreatedAt", DateText(item.CreatedAt) },
                     { "CompletedAt", item.CompletedAt.HasValue ? DateText(item.CompletedAt.Value) : null },
                     { "HasDeadline", item.HasDeadline },
@@ -173,6 +174,7 @@ namespace CornerTodo
                 RecurrenceOptions repeat = rule.Recurrence;
                 rules.Add(new Dictionary<string, object> {
                     { "Id", rule.Id }, { "Text", rule.Text }, { "Notes", rule.Notes ?? "" }, { "Priority", (int)rule.Priority },
+                    { "IsImportant", rule.IsImportant },
                     { "HasDeadline", rule.HasDeadline }, { "HasTime", rule.HasTime },
                     { "DeadlineOffsetDays", rule.DeadlineOffsetDays }, { "DeadlineTimeTicks", rule.DeadlineTimeTicks },
                     { "IsPaused", rule.IsPaused }, { "IsStopped", rule.IsStopped },
@@ -202,6 +204,7 @@ namespace CornerTodo
                         { "FloatingAutoExpand", settings.FloatingAutoExpand },
                         { "EdgeAutoHide", settings.EdgeAutoHide },
                         { "SortMode", (int)settings.SortMode },
+                        { "QuadrantUrgentHours", QuadrantRules.NormalizeUrgentHours(settings.QuadrantUrgentHours) },
                         { "Appearance", new Dictionary<string, object>
                             {
                                 { "BackgroundTransparency", appearance.BackgroundTransparency },
@@ -247,6 +250,7 @@ namespace CornerTodo
                     Text = RequiredString(item, "Text"),
                     Notes = OptionalNotes(item),
                     Priority = ReadPriority(item),
+                    IsImportant = item.TryGetValue("IsImportant", out value) && value is bool && (bool)value,
                     CreatedAt = RequiredDate(item, "CreatedAt"),
                     HasDeadline = hasDeadline,
                     DueDate = hasDeadline ? RequiredDate(item, "DueDate") : DateTime.MinValue,
@@ -277,6 +281,7 @@ namespace CornerTodo
                     var rule = new RecurringTaskRule {
                         Id = RequiredString(fields, "Id"), Text = RequiredString(fields, "Text"), Notes = OptionalNotes(fields),
                         Priority = (TaskPriority)Integer(fields, "Priority", 2), HasDeadline = Boolean(fields, "HasDeadline", false),
+                        IsImportant = fields.TryGetValue("IsImportant", out value) && value is bool && (bool)value,
                         HasTime = Boolean(fields, "HasTime", false), DeadlineOffsetDays = Integer(fields, "DeadlineOffsetDays", 0),
                         DeadlineTimeTicks = LongInteger(fields, "DeadlineTimeTicks", 0),
                         IsPaused = Boolean(fields, "IsPaused", false), IsStopped = Boolean(fields, "IsStopped", false),
@@ -316,6 +321,8 @@ namespace CornerTodo
                 state.Settings.EdgeAutoHide = settings.TryGetValue("EdgeAutoHide", out value) && value is bool && (bool)value;
                 state.Settings.SortMode = settings.TryGetValue("SortMode", out value) && value is int && Enum.IsDefined(typeof(TaskSortMode), value)
                     ? (TaskSortMode)(int)value : TaskSortMode.Deadline;
+                state.Settings.QuadrantUrgentHours = settings.TryGetValue("QuadrantUrgentHours", out value) && value is int
+                    ? QuadrantRules.NormalizeUrgentHours((int)value) : QuadrantRules.DefaultUrgentHours;
                 if (settings.TryGetValue("Appearance", out value))
                     state.Settings.Appearance = ReadAppearance(value);
             }

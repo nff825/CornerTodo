@@ -25,6 +25,7 @@ namespace CornerTodo
         public string Text { get; set; }
         public string Notes { get; set; }
         public TaskPriority Priority { get; set; }
+        public bool IsImportant { get; set; }
         public bool HasDeadline { get; set; }
         public bool HasTime { get; set; }
         public int DeadlineOffsetDays { get; set; }
@@ -65,7 +66,7 @@ namespace CornerTodo
         {
             if (source == null) throw new ArgumentNullException("source");
             return new RecurringTaskRule { Id = source.Id, Text = source.Text, Notes = source.Notes,
-                Priority = source.Priority, HasDeadline = source.HasDeadline, HasTime = source.HasTime,
+                Priority = source.Priority, IsImportant = source.IsImportant, HasDeadline = source.HasDeadline, HasTime = source.HasTime,
                 DeadlineOffsetDays = source.DeadlineOffsetDays, DeadlineTimeTicks = source.DeadlineTimeTicks,
                 Recurrence = Copy(source.Recurrence), IsPaused = source.IsPaused, IsStopped = source.IsStopped,
                 ProcessedThrough = source.ProcessedThrough, ReminderEnabled = source.ReminderEnabled,

@@ -46,6 +46,8 @@ internal static class ViewTests
             ReminderEditorTests.Run();
             DeadlineCalendarTests.Run();
             DeadlineCalendarUiTests.Run(args.Length == 0 ? null : args[0]);
+            ImportanceEditorTests.Run();
+            QuadrantUiTests.Run(args.Length == 0 ? null : args[0]);
             Console.WriteLine("PASS: " + groups + " view behavior groups, " + checks + " checks.");
             Console.WriteLine("Real control trees and unshown windows; no Window.Show, store, session, Data or startup registration is used.");
             Console.WriteLine("Native double-click input still needs interactive verification; this test does not set nonpublic MouseButtonEventArgs state.");

@@ -251,8 +251,8 @@ internal static class ReminderTests
             var store = new TodoStore(Path.Combine(root, "legacy-" + version)); Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
             string raw = "{\"Version\":" + version + ",\"Items\":[{\"Id\":\"old\",\"Text\":\"旧任务\",\"CreatedAt\":\"2026-10-20T10:00:00.0000000\",\"DueDate\":\"2026-11-20T17:00:00.0000000\",\"HasTime\":true}]}";
             File.WriteAllText(store.DataFilePath, raw, new UTF8Encoding(false)); byte[] before = File.ReadAllBytes(store.DataFilePath);
-            TodoState loaded = store.Load(); Check(loaded.Version == 4 && !loaded.Items.Single().ReminderEnabled && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Legacy load enabled reminders or rewrote bytes.");
-            store.Save(loaded); Check(File.ReadAllText(store.DataFilePath).Contains("\"Version\":4"), "First save did not use protected schema four.");
+            TodoState loaded = store.Load(); Check(loaded.Version == TodoState.CurrentVersion && !loaded.Items.Single().ReminderEnabled && before.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Legacy load enabled reminders or rewrote bytes.");
+            store.Save(loaded); Check(File.ReadAllText(store.DataFilePath).Contains("\"Version\":" + TodoState.CurrentVersion), "First save did not use the current protected schema.");
         }
     }
     private static void InvalidPersistence()

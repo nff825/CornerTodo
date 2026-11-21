@@ -32,6 +32,9 @@ namespace CornerTodo
         private readonly RadioButton highPriority;
         private readonly RadioButton normalPriority;
         private readonly RadioButton lowPriority;
+        private readonly CheckBox important;
+        private readonly TextBlock quadrantPreview;
+        private readonly int quadrantUrgentHours;
         private readonly TextBlock error;
         private readonly TodoItem original;
         private readonly Func<TaskDraft, bool> saveDraft;
@@ -59,16 +62,17 @@ namespace CornerTodo
             : this(item, focusNotes, saveDraft, null, item == null || String.IsNullOrEmpty(item.RecurringRuleId)) { }
 
         internal TaskEditor(TodoItem item, bool focusNotes, Func<TaskDraft, bool> saveDraft,
-            RecurrenceOptions initialRecurrence, bool allowRecurrence)
+            RecurrenceOptions initialRecurrence, bool allowRecurrence, int urgentHours = 24)
         {
             original = item;
             this.saveDraft = saveDraft;
+            quadrantUrgentHours = QuadrantRules.NormalizeUrgentHours(urgentHours);
             DateTime displayedDue = item == null || !item.HasDeadline ? DateTime.Today :
                 item.DueDate.Kind == DateTimeKind.Utc ? item.DueDate.ToLocalTime() : item.DueDate;
             editingRule = initialRecurrence != null;
             Title = editingRule ? "修改后续重复规则" : item == null ? "添加待办" : "编辑待办";
             bool showNotes = focusNotes || (item != null && !String.IsNullOrEmpty(item.Notes));
-            fullEditorHeight = (showNotes ? 690 : 535) + (allowRecurrence ? 36 : 26) + 40;
+            fullEditorHeight = (showNotes ? 690 : 535) + (allowRecurrence ? 36 : 26) + 40 + 112;
             Width = 460; Height = fullEditorHeight - (item != null && !item.HasDeadline ? 85 : 0);
             MinWidth = 320; MinHeight = 300;
             ResizeMode = ResizeMode.NoResize;
@@ -226,6 +230,17 @@ namespace CornerTodo
             normalPriority.IsChecked = !highPriority.IsChecked.Value && !lowPriority.IsChecked.Value;
             fields.Children.Add(priorities);
 
+            var importanceContent = new StackPanel();
+            important = new CheckBox { Content = "标为重要", IsChecked = item != null && item.IsImportant,
+                Foreground = Theme.Ink, FontWeight = FontWeights.SemiBold, FontSize = 14 };
+            AutomationProperties.SetName(important, "标为重要"); importanceContent.Children.Add(important);
+            var importanceHint = Theme.Text("用于四象限分类，紧急程度按截止时间判断。", 11, Theme.Muted);
+            importanceHint.Margin = new Thickness(22, 5, 0, 0); importanceContent.Children.Add(importanceHint);
+            var importanceCard = new Border { Child = importanceContent, Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 14, 0, 0), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1),
+                BorderBrush = Theme.Brush("#A5D3D6"), Background = Theme.Brush("#E9F5F6") };
+            fields.Children.Add(importanceCard);
+
             notes = new TextBox { Text = item == null ? "" : item.Notes ?? "", Height = 120, AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap, MaxLength = TodoRules.MaxNotesLength, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 Padding = new Thickness(10, 8, 10, 8), Background = Brushes.White, BorderBrush = Theme.Brush("#BDD0D8"), FontSize = 14,
@@ -238,6 +253,28 @@ namespace CornerTodo
                 Margin = new Thickness(0, 18, 0, 0), Foreground = Theme.Ink, FontSize = 13 };
             AutomationProperties.SetName(notesSection, "展开或收起备注"); fields.Children.Add(notesSection);
             notes.TextChanged += delegate { UpdateNotesCount(); }; UpdateNotesCount();
+
+            var quadrantRow = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            var quadrantLabel = Theme.Text("归类预览", 12, Theme.Muted);
+            quadrantLabel.Margin = new Thickness(0, 5, 12, 4); quadrantRow.Children.Add(quadrantLabel);
+            quadrantPreview = Theme.Text("", 12, Theme.Accent); quadrantPreview.FontWeight = FontWeights.SemiBold;
+            AutomationProperties.SetName(quadrantPreview, "四象限归类预览");
+            var quadrantBadge = new Border { Child = quadrantPreview, CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(9, 5, 9, 5), Background = Theme.Brush("#E0F0F2") };
+            quadrantRow.Children.Add(quadrantBadge); fields.Children.Add(quadrantRow);
+            important.Checked += delegate { UpdateQuadrantPreview(); };
+            important.Unchecked += delegate { UpdateQuadrantPreview(); };
+            useDeadline.Checked += delegate { UpdateQuadrantPreview(); };
+            useDeadline.Unchecked += delegate { UpdateQuadrantPreview(); };
+            useTime.Checked += delegate { UpdateQuadrantPreview(); };
+            useTime.Unchecked += delegate { UpdateQuadrantPreview(); };
+            date.SelectedDateChanged += delegate { UpdateQuadrantPreview(); };
+            date.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(delegate { UpdateQuadrantPreview(); }));
+            foreach (ComboBox input in new[] { hour, minute }) {
+                input.SelectionChanged += delegate { UpdateQuadrantPreview(); };
+                input.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(delegate { UpdateQuadrantPreview(); }));
+            }
+            UpdateQuadrantPreview();
 
             error = Theme.Text("", 12, Theme.Warning); error.Margin = new Thickness(0, 8, 0, 0);
             AutomationProperties.SetName(error, "待办编辑错误提示");
@@ -399,6 +436,44 @@ namespace CornerTodo
             notesCount.Foreground = notes.Text.Length > TodoRules.MaxNotesLength ? Theme.Warning : Theme.Muted;
         }
 
+        private void UpdateQuadrantPreview()
+        {
+            bool hasDeadline = useDeadline.IsChecked == true;
+            bool hasTime = hasDeadline && useTime.IsChecked == true;
+            DateTime due = DateTime.MinValue;
+            if (hasDeadline) {
+                DateTime selected;
+                if (String.IsNullOrWhiteSpace(date.Text) || !DateTime.TryParse(date.Text, CultureInfo.GetCultureInfo("zh-CN"), DateTimeStyles.AllowWhiteSpaces, out selected)) {
+                    quadrantPreview.Text = "请先填写有效截止日期"; quadrantPreview.Foreground = Theme.Warning; return;
+                }
+                due = selected.Date;
+                if (hasTime) {
+                    int selectedHour, selectedMinute;
+                    if (!TryTimePart(hour, 23, out selectedHour) || !TryTimePart(minute, 59, out selectedMinute)) {
+                        quadrantPreview.Text = "请先填写有效具体时刻"; quadrantPreview.Foreground = Theme.Warning; return;
+                    }
+                    due = due.AddHours(selectedHour).AddMinutes(selectedMinute);
+                }
+                due = PreserveOriginalDeadline(due, hasTime);
+            }
+            // Preview the editable draft, including completed occurrences. The
+            // original task and its completion timestamp are never classified.
+            var preview = new TodoItem { IsImportant = important.IsChecked == true, HasDeadline = hasDeadline,
+                HasTime = hasTime, DueDate = due };
+            quadrantPreview.Text = QuadrantRules.Label(QuadrantRules.Classify(preview, DateTime.Now, quadrantUrgentHours));
+            quadrantPreview.Foreground = Theme.Accent;
+        }
+
+        private DateTime PreserveOriginalDeadline(DateTime due, bool hasTime)
+        {
+            if (original != null && original.HasDeadline && hasTime == original.HasTime) {
+                DateTime localOriginal = original.DueDate.Kind == DateTimeKind.Utc ? original.DueDate.ToLocalTime() : original.DueDate;
+                if (due.Date == localOriginal.Date && (!hasTime || (due.Hour == localOriginal.Hour && due.Minute == localOriginal.Minute)))
+                    return original.DueDate;
+            }
+            return due;
+        }
+
         private void UpdateDeadlineFields()
         {
             bool enabled = useDeadline.IsChecked == true;
@@ -482,12 +557,7 @@ namespace CornerTodo
             }
             // Keep the original precision and time kind when the visible deadline
             // fields were not changed, including legacy deadlines with seconds.
-            if (hasDeadline && original != null && original.HasDeadline && hasTime == original.HasTime)
-            {
-                DateTime localOriginal = original.DueDate.Kind == DateTimeKind.Utc ? original.DueDate.ToLocalTime() : original.DueDate;
-                if (due.Date == localOriginal.Date && (!hasTime || (due.Hour == localOriginal.Hour && due.Minute == localOriginal.Minute)))
-                    due = original.DueDate;
-            }
+            if (hasDeadline) due = PreserveOriginalDeadline(due, hasTime);
             TaskPriority priority = highPriority.IsChecked == true ? TaskPriority.High : lowPriority.IsChecked == true ? TaskPriority.Low : TaskPriority.Normal;
             RecurrenceOptions recurrence = ReadRecurrenceOptions();
             if (recurrence != null) {
@@ -510,7 +580,7 @@ namespace CornerTodo
                 error.Text = "提前时长超出可用日期范围，请减少。"; reminderDays.Focus(); return;
             }
             var draft = new TaskDraft { Text = text, HasDeadline = hasDeadline, DueDate = due, HasTime = hasTime, Notes = notes.Text, Priority = priority, Recurrence = recurrence,
-                ReminderEnabled = reminderEnabled, ReminderMinutesBefore = reminderEnabled ? reminderLead : 0 };
+                IsImportant = important.IsChecked == true, ReminderEnabled = reminderEnabled, ReminderMinutesBefore = reminderEnabled ? reminderLead : 0 };
             // Keep the editable fields open until persistence succeeds, so a
             // transient disk failure cannot discard a long note or other input.
             if (saveDraft != null && !saveDraft(draft))

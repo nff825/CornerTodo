@@ -37,6 +37,7 @@ namespace CornerTodo
         private bool missedRecurrencesOffered;
         private Window activeDialog;
         private DeadlineCalendarWindow deadlineCalendar;
+        private QuadrantWindow quadrantWindow;
         private const string DesktopPendingMessage = "暂时无法连接桌面层。当前以普通窗口显示。";
         public bool HostLost { get; set; }
         public event EventHandler HandleLost;
@@ -104,7 +105,7 @@ namespace CornerTodo
                         DateTime now = DateTime.Now;
                         panel.UpdateHeader(this.state, now, preview);
                         panel.UpdateTimes(now);
-                        RefreshDeadlineCalendar(now);
+                        RefreshTaskWindows(now);
                     }
                     else { ProcessRecurrences(false); Render(); }
                 }
@@ -164,6 +165,7 @@ namespace CornerTodo
             if (disposed) return;
             disposed = true;
             if (deadlineCalendar != null) deadlineCalendar.Close();
+            if (quadrantWindow != null) quadrantWindow.Close();
             reminders.Dispose();
             Loaded -= LoadedWindow; Closed -= ClosedWindow;
             desktopAttachment.HandleLost -= DesktopHandleLost;
@@ -192,7 +194,7 @@ namespace CornerTodo
             panel.Render(state, now, preview, appearancePreview);
             Foreground = panel.Palette.Ink;
             UpdateExpansion(false, false);
-            RefreshDeadlineCalendar(now);
+            RefreshTaskWindows(now);
             if (reminders != null) reminders.Refresh();
         }
 
@@ -205,7 +207,7 @@ namespace CornerTodo
                 DateTime now = DateTime.Now;
                 panel.UpdateHeader(state, now, preview);
                 panel.UpdateTimes(now);
-                RefreshDeadlineCalendar(now);
+                RefreshTaskWindows(now);
             }
         }
 
@@ -275,6 +277,8 @@ namespace CornerTodo
             var create = new MenuItem { Header = "添加待办" }; create.Click += delegate { Edit(null); }; menu.Items.Add(create);
             var calendar = new MenuItem { Header = "截止日历…", Tag = "deadline-calendar" };
             calendar.Click += delegate { OpenDeadlineCalendar(); }; menu.Items.Add(calendar);
+            var quadrants = new MenuItem { Header = "四象限…", Tag = "quadrant-view" };
+            quadrants.Click += delegate { OpenQuadrants(); }; menu.Items.Add(quadrants);
             var recurring = new MenuItem { Header = "管理重复任务…", Tag = "recurring-management" };
             recurring.Click += delegate { ManageRecurringTasks(); }; menu.Items.Add(recurring);
             var catchUp = new MenuItem { Header = "处理遗漏周期…", Tag = "recurring-catch-up" };
@@ -376,7 +380,7 @@ namespace CornerTodo
         {
             if (disposed || HostLost || applicationInteraction.IsBusy) return;
             if (deadlineCalendar != null) {
-                RefreshDeadlineCalendar(DateTime.Now);
+                RefreshTaskWindows(DateTime.Now);
                 if (deadlineCalendar.WindowState == WindowState.Minimized) deadlineCalendar.WindowState = WindowState.Normal;
                 deadlineCalendar.Activate();
                 return;
@@ -404,9 +408,46 @@ namespace CornerTodo
             if (current != null) EditTask(current, false, deadlineCalendar);
         }
 
-        private void RefreshDeadlineCalendar(DateTime now)
+        private void OpenQuadrants()
+        {
+            if (disposed || HostLost || applicationInteraction.IsBusy) return;
+            if (quadrantWindow != null) {
+                RefreshTaskWindows(DateTime.Now);
+                if (quadrantWindow.WindowState == WindowState.Minimized) quadrantWindow.WindowState = WindowState.Normal;
+                quadrantWindow.Activate();
+                return;
+            }
+            var window = new QuadrantWindow(state, DateTime.Now,
+                delegate { EditTask(null, false, quadrantWindow); }, EditFromQuadrants,
+                delegate(TodoItem item, bool completed) {
+                    if (disposed || HostLost || applicationInteraction.IsBusy) return false;
+                    return Execute(delegate { session.SetCompleted(item.Id, completed); }, "完成状态未保存。", true);
+                },
+                delegate(int hours) {
+                    if (disposed || HostLost || applicationInteraction.IsBusy) return false;
+                    return Execute(delegate { session.SetQuadrantUrgentHours(hours); }, "紧急范围未保存。", true);
+                });
+            Rect area = DesktopHost.WorkArea(this);
+            FitWindowToWorkArea(window, area);
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Left = area.Left + (area.Width - window.Width) / 2;
+            window.Top = area.Top + (area.Height - window.Height) / 2;
+            window.Closed += delegate { quadrantWindow = null; };
+            quadrantWindow = window;
+            window.Show();
+        }
+
+        private void EditFromQuadrants(TodoItem item)
+        {
+            if (disposed || HostLost || quadrantWindow == null) return;
+            TodoItem current = state.Items.FirstOrDefault(candidate => candidate.Id == item.Id);
+            if (current != null) EditTask(current, false, quadrantWindow);
+        }
+
+        private void RefreshTaskWindows(DateTime now)
         {
             if (deadlineCalendar != null) deadlineCalendar.Refresh(state, now, appearancePreview);
+            if (quadrantWindow != null) quadrantWindow.Refresh(state, now, appearancePreview);
         }
 
         private void EditTask(TodoItem item, bool focusNotes, Window parent = null)
@@ -425,7 +466,7 @@ namespace CornerTodo
                     }, "保存失败，输入仍保留在编辑窗口。", false);
                     if (saved) savedRecurrence = draft.Recurrence != null;
                     return saved;
-                });
+                }, null, item == null || String.IsNullOrEmpty(item.RecurringRuleId), state.Settings.QuadrantUrgentHours);
                 editor.SaveErrorProvider = delegate { return panel.StatusText.Text; };
                 Rect area = DesktopHost.WorkArea(parent ?? this);
                 FitWindowToWorkArea(editor, area);
@@ -502,7 +543,7 @@ namespace CornerTodo
             bool previousEditor = applicationInteraction.EditorOpen;
             applicationInteraction.EditorOpen = true; interaction.StopAnimation(); RevealFromEdge();
             try {
-                var template = new TodoItem { Id = rule.Id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority,
+                var template = new TodoItem { Id = rule.Id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority, IsImportant = rule.IsImportant,
                     HasDeadline = rule.HasDeadline, HasTime = rule.HasTime,
                     ReminderEnabled = rule.ReminderEnabled, ReminderMinutesBefore = rule.ReminderMinutesBefore,
                     DueDate = rule.HasDeadline ? rule.Recurrence.StartDate.AddDays(rule.DeadlineOffsetDays).AddTicks(rule.DeadlineTimeTicks) : DateTime.MinValue };
@@ -522,7 +563,7 @@ namespace CornerTodo
                         };
                     }
                     return saved;
-                }, RecurringTasks.Copy(rule.Recurrence), true);
+                }, RecurringTasks.Copy(rule.Recurrence), true, state.Settings.QuadrantUrgentHours);
                 editor.SaveErrorProvider = delegate { return saveError; };
                 FitRecurringWindow(editor);
                 if (ShowChildDialog(editor) == true) { state = session.Snapshot(); Render(); ShowStatus("后续规则已更新，已生成事项与完成历史保持原样。"); }

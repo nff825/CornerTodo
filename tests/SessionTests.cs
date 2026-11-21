@@ -32,6 +32,8 @@ internal static class SessionTests
             Run("Every failed operation preserves state and can be retried", FailedOperations);
             Run("Independent settings changes preserve tasks and the other settings", SettingsIsolation);
             Run("Text scale snapshots, persistence and failed saves preserve committed task state", TextScalePreference);
+            Run("Independent importance preserves scheduling, reminder plans and failure isolation", ImportanceLifecycle);
+            Run("Quadrant threshold saves transactionally and survives restart", QuadrantThresholdPreference);
             Run("Preview operations change only the isolated session", Preview);
             Run("Real isolated persistence survives restart and a locked-save failure", RealStoreRoundTrip);
             Run("Notes and priority preserve scheduling through edits, completion and restoration", DetailsLifecycle);
@@ -44,6 +46,7 @@ internal static class SessionTests
             Run("Setting, removing and restoring deadlines use the current scheduling epoch", NoDeadlineScheduling);
             Run("Failed undated and dated transitions leave committed state unchanged and retry cleanly", NoDeadlineSaveFailures);
             Run("Undated state survives real restart and legacy session migration never writes", NoDeadlinePersistence);
+            QuadrantRulesTests.Run();
             Console.WriteLine("PASS: " + passed + " session behavior tests.");
             Console.WriteLine("No WPF, production Data or Windows startup registration is used.");
             return 0;
@@ -437,6 +440,77 @@ internal static class SessionTests
         expected.Settings.Appearance.TextScale = 1;
         Equal(expected, restarted.Snapshot(), "Invalid scale normalization reset tasks or other preferences");
         Assert(Double.IsNaN(draft.TextScale), "Text scale normalization modified its caller.");
+    }
+
+    private static void ImportanceLifecycle()
+    {
+        DateTime now = Epoch;
+        var writer = new RecordingStore();
+        var session = new TodoSession(writer, new TodoState(), false, delegate { return now; });
+        TaskDraft draft = Draft("重要但低优先级");
+        draft.IsImportant = true; draft.Priority = TaskPriority.Low;
+        draft.ReminderEnabled = true; draft.ReminderMinutesBefore = 15;
+        TodoItem added = session.Add(draft);
+        Assert(added.IsImportant && added.Priority == TaskPriority.Low, "Add lost independent importance.");
+        draft.IsImportant = false;
+        added.IsImportant = false;
+        TodoState exposed = session.Snapshot(); exposed.Items[0].IsImportant = false;
+        Assert(Only(session).IsImportant, "Draft, result or snapshot changed committed importance.");
+        TodoItem original = Only(session);
+        now = now.AddHours(1);
+        session.Edit(original.Id, draft);
+        TodoItem edited = Only(session);
+        Assert(!edited.IsImportant && edited.Priority == TaskPriority.Low && edited.DeadlineSetAt == original.DeadlineSetAt &&
+            edited.ReminderPlanId == original.ReminderPlanId && edited.ReminderSetAt == original.ReminderSetAt &&
+            edited.ReminderHandledAt == original.ReminderHandledAt, "Importance edit reset the deadline epoch or reminder plan.");
+        TodoState before = session.Snapshot();
+        draft.IsImportant = true;
+        writer.DuringSave = delegate(TodoState received) { received.Items[0].IsImportant = true; throw new IOException("fixture importance failure"); };
+        ExpectSaveFailure(delegate { session.Edit(original.Id, draft); });
+        Equal(before, session.Snapshot(), "Failed importance edit changed committed state");
+        writer.DuringSave = null;
+        session.Edit(original.Id, draft);
+        Assert(Only(session).IsImportant && Only(session).ReminderPlanId == original.ReminderPlanId, "Importance retry lost the mark or changed the reminder.");
+        session.SetCompleted(original.Id, true);
+        Assert(Only(session).IsImportant, "Completion discarded importance.");
+        session.SetCompleted(original.Id, false);
+        Assert(Only(session).IsImportant && Only(session).DeadlineSetAt == original.DeadlineSetAt, "Reopening discarded importance or reset the scheduling epoch.");
+        var store = new TodoStore(Path.Combine(temporaryRoot, "importance-restart"));
+        store.Save(session.Snapshot());
+        Equal(session.Snapshot(), new TodoSession(store, store.Load(), false, delegate { return now; }).Snapshot(), "Restart lost importance");
+    }
+
+    private static void QuadrantThresholdPreference()
+    {
+        var writer = new RecordingStore();
+        var session = new TodoSession(writer, Fixture(), false, delegate { return Epoch; });
+        TodoState expected = session.Snapshot();
+        session.SetQuadrantUrgentHours(24);
+        Assert(writer.Arguments.Count == 0, "Selecting the current quadrant threshold unnecessarily saved data.");
+        writer.DuringSave = delegate(TodoState received) {
+            received.Settings.QuadrantUrgentHours = 168; received.Items.Clear();
+            throw new IOException("fixture quadrant threshold failure");
+        };
+        ExpectSaveFailure(delegate { session.SetQuadrantUrgentHours(6); });
+        Equal(expected, session.Snapshot(), "A failed threshold save changed settings or tasks");
+        writer.DuringSave = null;
+        foreach (int hours in new[] { 6, 72, 168, 24 }) {
+            session.SetQuadrantUrgentHours(hours);
+            expected.Settings.QuadrantUrgentHours = hours;
+            Equal(expected, session.Snapshot(), "Threshold editing changed unrelated settings or tasks");
+            TodoState snapshot = session.Snapshot(); snapshot.Settings.QuadrantUrgentHours = 0;
+            Equal(expected, session.Snapshot(), "Threshold snapshots shared mutable settings");
+        }
+        int writes = writer.Arguments.Count;
+        foreach (int invalid in new[] { 0, -1, 12, Int32.MaxValue })
+            ExpectBusinessFailure(delegate { session.SetQuadrantUrgentHours(invalid); });
+        Assert(writer.Arguments.Count == writes, "An invalid threshold attempted to save.");
+        Equal(expected, session.Snapshot(), "Invalid threshold changed committed data");
+        session.SetQuadrantUrgentHours(72);
+        expected.Settings.QuadrantUrgentHours = 72;
+        var store = new TodoStore(Path.Combine(temporaryRoot, "quadrant-threshold-restart"));
+        store.Save(session.Snapshot());
+        Equal(expected, new TodoSession(store, store.Load(), false, delegate { return Epoch; }).Snapshot(), "Restart lost quadrant threshold");
     }
 
     private static void Preview()

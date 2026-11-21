@@ -56,6 +56,8 @@ internal static class StoreTests
             Run("Cloning and normalization isolate live appearance from draft edits", AppearanceCloneIsolation);
             Run("Optional text scale defaults independently and accepts supported saved values", TextScaleReadCompatibility);
             Run("Text scale saves with existing data version and repairs invalid fields independently", TextScalePersistence);
+            Run("Legacy importance defaults false and migrates to schema five only on save", ImportanceCompatibility);
+            Run("Quadrant thresholds and independent importance persist and repair optional fields", QuadrantPersistence);
             Run("Version-one files load optional task fields without rewriting or losing data", TaskDetailsMigration);
             Run("Notes, priority and sort preference survive restart and clearing notes", TaskDetailsRoundTrip);
             Run("Invalid optional ranks fall back and malformed note content is preserved for recovery", TaskDetailsReadPolicy);
@@ -872,7 +874,7 @@ internal static class StoreTests
             store.Save(state);
             state = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
             AssertAppearanceTask(state);
-            Assert(TodoState.CurrentVersion == 4 && state.Version == 4 && state.Settings.Appearance.TextScale == scale &&
+            Assert(state.Version == TodoState.CurrentVersion && state.Settings.Appearance.TextScale == scale &&
                 state.Settings.Appearance.BackgroundColor == "#ABCDEF", "Restart lost scale, palette or the existing data version.");
             var json = (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(store.DataFilePath));
             var settings = (IDictionary<string, object>)json["Settings"];
@@ -905,6 +907,83 @@ internal static class StoreTests
             "Scale edits escaped the draft or were ignored by appearance matching.");
         AppearanceSettings invalidColor = AppearanceSettings.Normalize(new AppearanceSettings { BackgroundColor = "bad", TextScale = 1.2 });
         Assert(invalidColor.TextScale == 1.2 && invalidColor.BackgroundColor == "#F4F9FB", "Repairing a color discarded a valid scale.");
+    }
+
+    private static void ImportanceCompatibility()
+    {
+        Assert(TodoState.CurrentVersion == 5, "Independent importance must be protected by schema version five.");
+        for (int version = 1; version <= 4; version++) {
+            TodoStore store = Store("importance-legacy-" + version);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            string json = AppearanceDocument("{\"Width\":460}").Replace("\"Version\":1", "\"Version\":" + version)
+                .Replace("\"Text\":", "\"Priority\":1,\"Text\":");
+            File.WriteAllText(store.DataFilePath, json, Encoding.UTF8);
+            byte[] saved = File.ReadAllBytes(store.DataFilePath);
+            TodoState loaded = store.Load();
+            AssertAppearanceTask(loaded);
+            Assert(!loaded.Items.Single().IsImportant && loaded.Items.Single().Priority == TaskPriority.High &&
+                loaded.Settings.QuadrantUrgentHours == 24 && loaded.Settings.Width == 460,
+                "Legacy data inferred importance from priority or lost a default.");
+            Assert(store.LoadWarning == null && saved.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Legacy importance migration rewrote or recovered the source file.");
+            store.Save(loaded);
+            TodoState restarted = store.Load();
+            Assert(restarted.Version == 5 && !restarted.Items[0].IsImportant &&
+                File.ReadAllText(store.DataFilePath).Contains("\"Version\":5"), "Explicit save did not migrate legacy importance to schema five.");
+        }
+    }
+
+    private static void QuadrantPersistence()
+    {
+        TodoStore store = Store("quadrant-roundtrip");
+        TodoState state = State("重要性独立于优先级");
+        state.Items[0].IsImportant = true;
+        state.Items[0].Priority = TaskPriority.Low;
+        state.Settings.Appearance.TextScale = 1.3;
+        state.RecurringRules.Add(new RecurringTaskRule { Id = "important-rule", Text = "重要的重复任务", IsImportant = true,
+            Priority = TaskPriority.Low, Recurrence = new RecurrenceOptions { StartDate = new DateTime(2026, 11, 21) } });
+        foreach (int hours in new[] { 6, 24, 72, 168 }) {
+            state.Settings.QuadrantUrgentHours = hours;
+            store.Save(state);
+            TodoState loaded = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+            Assert(loaded.Items.Single().IsImportant && loaded.Items.Single().Priority == TaskPriority.Low &&
+                loaded.RecurringRules.Single().IsImportant && loaded.RecurringRules.Single().Priority == TaskPriority.Low &&
+                loaded.Settings.QuadrantUrgentHours == hours && loaded.Settings.Appearance.TextScale == 1.3 && loaded.Version == 5,
+                "Importance or quadrant threshold was lost on restart or changed another setting.");
+        }
+        string valid = File.ReadAllText(store.DataFilePath);
+        string[] importance = { "true", "false", "null", "1", "\"true\"", "[]", "{}" };
+        for (int index = 0; index < importance.Length; index++) {
+            TodoStore malformed = Store("importance-optional-" + index);
+            Directory.CreateDirectory(Path.GetDirectoryName(malformed.DataFilePath));
+            string json = valid.Replace("\"IsImportant\":true", "\"IsImportant\":" + importance[index]);
+            File.WriteAllText(malformed.DataFilePath, json, Encoding.UTF8);
+            byte[] saved = File.ReadAllBytes(malformed.DataFilePath);
+            TodoState loaded = malformed.Load();
+            Assert(loaded.Items.Single().IsImportant == (index == 0) && loaded.RecurringRules.Single().IsImportant == (index == 0) &&
+                loaded.Items[0].Text == state.Items[0].Text && loaded.Items[0].DueDate == state.Items[0].DueDate &&
+                loaded.Settings.QuadrantUrgentHours == 168 && loaded.Settings.Appearance.TextScale == 1.3,
+                "Malformed optional importance discarded a task, rule or unrelated preference.");
+            Assert(malformed.LoadWarning == null && saved.SequenceEqual(File.ReadAllBytes(malformed.DataFilePath)) &&
+                Directory.GetFiles(Path.GetDirectoryName(malformed.DataFilePath), "*.corrupt-*").Length == 0,
+                "Importance fallback archived or rewrote valid data.");
+        }
+        string[] thresholds = { "6", "24", "72", "168", "0", "25", "null", "\"72\"", "true", "{}", "[]", "72.0", "2147483648" };
+        int[] expected = { 6, 24, 72, 168, 24, 24, 24, 24, 24, 24, 24, 24, 24 };
+        for (int index = 0; index < thresholds.Length; index++) {
+            TodoStore malformed = Store("quadrant-optional-" + index);
+            Directory.CreateDirectory(Path.GetDirectoryName(malformed.DataFilePath));
+            string json = valid.Replace("\"QuadrantUrgentHours\":168", "\"QuadrantUrgentHours\":" + thresholds[index]);
+            File.WriteAllText(malformed.DataFilePath, json, Encoding.UTF8);
+            byte[] saved = File.ReadAllBytes(malformed.DataFilePath);
+            TodoState loaded = malformed.Load();
+            Assert(loaded.Settings.QuadrantUrgentHours == expected[index] && loaded.Items.Single().IsImportant && loaded.RecurringRules.Single().IsImportant &&
+                loaded.Settings.Appearance.TextScale == 1.3 && malformed.LoadWarning == null && saved.SequenceEqual(File.ReadAllBytes(malformed.DataFilePath)),
+                "An optional threshold changed valid task data or did not use an independent fallback.");
+        }
+        state.Settings.QuadrantUrgentHours = -10;
+        store.Save(state);
+        Assert(state.Settings.QuadrantUrgentHours == -10 && store.Load().Settings.QuadrantUrgentHours == 24 &&
+            store.Load().Items[0].IsImportant, "Saving an unsupported threshold mutated its caller or discarded task importance.");
     }
 
     private static void TaskDetailsMigration()

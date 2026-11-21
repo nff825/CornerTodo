@@ -9,6 +9,7 @@ namespace CornerTodo
         public string Text { get; set; }
         public string Notes { get; set; }
         public TaskPriority Priority { get; set; }
+        public bool IsImportant { get; set; }
         public DateTime DueDate { get; set; }
         public bool HasDeadline { get; set; }
         public bool HasTime { get; set; }
