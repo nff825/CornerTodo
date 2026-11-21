@@ -34,12 +34,17 @@
     <Compile Include="src/Tasks/RecurringTasks.cs"><TestGroups>Store;Session</TestGroups></Compile>
     <Compile Include="src/Tasks/ReminderRules.cs"><TestGroups>Store;Session</TestGroups></Compile>
     <Compile Include="src/Tasks/QuadrantRules.cs"><TestGroups>Store;Session</TestGroups></Compile>
+    <Compile Include="src/Tasks/FileLinkRules.cs"><TestGroups>Store;Session</TestGroups></Compile>
     <Compile Include="src/UI/PanelController.cs" />
     <Compile Include="src/App/Program.cs" />
     <Compile Include="src/App/SingleInstanceSession.cs" />
     <Compile Include="src/Windows/StartupManager.cs" />
     <Compile Include="src/Tasks/TaskDraft.cs"><TestGroups>Session</TestGroups></Compile>
     <Compile Include="src/UI/TaskEditor.cs" />
+    <Compile Include="src/UI/FileLinksEditor.cs" />
+    <Compile Include="src/UI/FileLinkEntry.cs" />
+    <Compile Include="src/UI/FileLinksWindow.cs" />
+    <Compile Include="src/Windows/FileLinkService.cs" />
     <Compile Include="src/UI/DeadlineCalendarData.cs" />
     <Compile Include="src/UI/DeadlineCalendarWindow.cs" />
     <Compile Include="src/UI/QuadrantWindow.cs" />
@@ -81,6 +86,7 @@
     <CornerTodoTestSource Include="tests/StoreTests.cs"><Suite>Store</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/SessionTests.cs"><Suite>Session</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/QuadrantRulesTests.cs"><Suite>Session</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/FileLinkTests.cs"><Suite>Session</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/RecurrenceTests.cs"><Suite>Recurrence</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/ReminderTests.cs"><Suite>Reminder</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/ReminderControllerTests.cs"><Suite>ReminderUi</Suite></CornerTodoTestSource>
@@ -95,6 +101,9 @@
     <CornerTodoTestSource Include="tests/DeadlineCalendarUiTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/QuadrantUiTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/ImportanceEditorTests.cs"><Suite>View</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/FileLinkEditorTests.cs"><Suite>View</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/FileLinkWindowTests.cs"><Suite>View</Suite></CornerTodoTestSource>
+    <CornerTodoTestSource Include="tests/FileLinkEntryTests.cs"><Suite>View</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/OffscreenUiTests.cs"><Suite>OffscreenUi</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/EdgeUiTests.cs"><Suite>OffscreenUi</Suite></CornerTodoTestSource>
     <CornerTodoTestSource Include="tests/AppearanceUiTests.cs"><Suite>AppearanceUi</Suite></CornerTodoTestSource>
@@ -155,6 +164,8 @@
     <CornerTodoPublicFile Include="docs/images/text-scale-panel.png" />
     <CornerTodoPublicFile Include="docs/images/quadrant.png" />
     <CornerTodoPublicFile Include="docs/images/importance-editor.png" />
+    <CornerTodoPublicFile Include="docs/images/file-links-editor.png" />
+    <CornerTodoPublicFile Include="docs/images/file-links-popup.png" />
     <!-- Keep linked task rules and Mac development UI in the same public source snapshot. -->
     <CornerTodoPublicFile Include="macOS/VERSION" />
     <CornerTodoPublicFile Include="macOS/README.md" />

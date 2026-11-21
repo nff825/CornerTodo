@@ -13,6 +13,7 @@
     <Compile Include="../../tests/StoreTests.cs" Link="Shared/StoreTests.cs" />
     <Compile Include="../../tests/SessionTests.cs" Link="Shared/SessionTests.cs" />
     <Compile Include="../../tests/QuadrantRulesTests.cs" Link="Shared/QuadrantRulesTests.cs" />
+    <Compile Include="../../tests/FileLinkTests.cs" Link="Shared/FileLinkTests.cs" />
     <Compile Include="../../tests/RecurrenceTests.cs" Link="Shared/RecurrenceTests.cs" />
     <Compile Include="../../tests/ReminderTests.cs" Link="Shared/ReminderTests.cs" />
     <Compile Include="../../tests/GrowthLayoutTests.cs" Link="Shared/GrowthLayoutTests.cs" />

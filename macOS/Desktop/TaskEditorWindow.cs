@@ -107,6 +107,7 @@ internal sealed class TaskEditorWindow : Window
         TaskPriority priority = high.IsChecked == true ? TaskPriority.High : low.IsChecked == true ? TaskPriority.Low : TaskPriority.Normal;
         if (UseDeadline.IsChecked != true)
             return new TaskDraft { Text = text, Notes = notes, Priority = priority, IsImportant = original?.IsImportant == true,
+                FileLinks = FileLinkRules.Copy(original?.FileLinks),
                 HasDeadline = false, DueDate = DateTime.MinValue, HasTime = false };
         DateTime selected;
         if (!string.IsNullOrWhiteSpace(Date.Text))
@@ -132,6 +133,7 @@ internal sealed class TaskEditorWindow : Window
             if (due.Date == local.Date && (!hasTime || (due.Hour == local.Hour && due.Minute == local.Minute))) due = original.DueDate;
         }
         return new TaskDraft { Text = text, Notes = notes, DueDate = due, HasDeadline = true, HasTime = hasTime,
+            FileLinks = FileLinkRules.Copy(original?.FileLinks),
             Priority = priority, IsImportant = original?.IsImportant == true,
             ReminderEnabled = hasTime && original?.ReminderEnabled == true,
             ReminderMinutesBefore = hasTime && original?.ReminderEnabled == true ? original.ReminderMinutesBefore : 0 };
