@@ -52,6 +52,7 @@ namespace CornerTodo
             }
             var item = new TodoItem {
                 Id = Guid.NewGuid().ToString("N"), Text = input.Text, Notes = input.Notes, Priority = input.Priority,
+                FileLinks = FileLinkRules.Copy(input.FileLinks),
                 IsImportant = input.IsImportant,
                 DueDate = input.DueDate, HasDeadline = input.HasDeadline, HasTime = input.HasTime,
                 CreatedAt = savedAt, DeadlineSetAt = input.HasDeadline ? (DateTime?)savedAt : null
@@ -75,6 +76,7 @@ namespace CornerTodo
             bool previouslyScheduled = item.HasDeadline;
             DateTime previousDeadline = TodoRules.Deadline(item);
             item.Text = input.Text; item.Notes = input.Notes; item.Priority = input.Priority; item.IsImportant = input.IsImportant;
+            item.FileLinks = FileLinkRules.Copy(input.FileLinks);
             item.DueDate = input.DueDate; item.HasDeadline = input.HasDeadline; item.HasTime = input.HasTime;
             if (!item.HasDeadline) item.DeadlineSetAt = null;
             else if (!previouslyScheduled || TodoRules.Deadline(item) != previousDeadline) item.DeadlineSetAt = now();
@@ -253,6 +255,7 @@ namespace CornerTodo
             int offset = input.HasDeadline ? (int)(localDue.Date - options.StartDate.Date).TotalDays : 0;
             if (offset < 0) throw new ArgumentException("重复事项的截止日期不能早于开始日期。");
             var rule = new RecurringTaskRule { Id = id, Text = input.Text, Notes = input.Notes, Priority = input.Priority,
+                FileLinks = FileLinkRules.Copy(input.FileLinks),
                 IsImportant = input.IsImportant,
                 HasDeadline = input.HasDeadline, HasTime = input.HasTime, DeadlineOffsetDays = offset,
                 DeadlineTimeTicks = input.HasTime ? localDue.TimeOfDay.Ticks : 0, Recurrence = options,
@@ -284,6 +287,7 @@ namespace CornerTodo
             string id = rule.Id + "_" + date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
             if (state.Items.Any(item => item.Id == id)) throw new InvalidOperationException("重复事项标识冲突，尚未生成。");
             var itemToAdd = new TodoItem { Id = id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority,
+                FileLinks = FileLinkRules.Copy(rule.FileLinks),
                 IsImportant = rule.IsImportant,
                 HasDeadline = rule.HasDeadline, HasTime = rule.HasTime,
                 DueDate = rule.HasDeadline ? date.AddDays(rule.DeadlineOffsetDays).AddTicks(rule.DeadlineTimeTicks) : DateTime.MinValue,
@@ -394,6 +398,16 @@ namespace CornerTodo
         {
             return first.RecurringRules.Count == second.RecurringRules.Count && first.RecurringRules.Zip(second.RecurringRules,
                 (a, b) => a.ProcessedThrough == b.ProcessedThrough).All(equal => equal);
+        }
+
+        public void SetFileLinks(string taskId, IEnumerable<string> paths)
+        {
+            int index = Find(taskId);
+            List<string> links = FileLinkRules.Normalize(paths);
+            if (FileLinkRules.Copy(current.Items[index].FileLinks).SequenceEqual(links, StringComparer.Ordinal)) return;
+            TodoState next = Snapshot();
+            next.Items[index].FileLinks = links;
+            Commit(next);
         }
 
         public void SetCompleted(string id, bool completed)
@@ -526,6 +540,7 @@ namespace CornerTodo
             if (notes.Length > TodoRules.MaxNotesLength) throw new ArgumentException("备注最多可填写 " + TodoRules.MaxNotesLength + " 个字符。", "draft");
             ReminderRules.ValidateInput(draft.ReminderEnabled, draft.ReminderMinutesBefore, draft.HasDeadline, draft.HasTime, draft.DueDate);
             return new TaskDraft { Text = draft.Text.Trim(), Notes = notes, Priority = draft.Priority, IsImportant = draft.IsImportant,
+                FileLinks = FileLinkRules.Normalize(draft.FileLinks),
                 HasDeadline = draft.HasDeadline, DueDate = draft.HasDeadline ? draft.DueDate : DateTime.MinValue,
                 HasTime = draft.HasDeadline && draft.HasTime, Recurrence = RecurringTasks.Copy(draft.Recurrence),
                 ReminderEnabled = draft.ReminderEnabled, ReminderMinutesBefore = draft.ReminderEnabled ? draft.ReminderMinutesBefore : 0 };

@@ -18,6 +18,7 @@ namespace CornerTodo
         private readonly bool windowed;
         private readonly bool preview;
         private readonly IStartupManager startupManager;
+        private readonly IFileLinkService fileLinkService;
         private readonly TodoPanelView panel;
         private readonly PanelController interaction;
         private readonly ApplicationInteraction applicationInteraction;
@@ -58,13 +59,15 @@ namespace CornerTodo
 
         internal MainWindow(TodoStore store, TodoSession session, bool windowed, bool preview,
             IStartupManager startupManager, IPanelHost panelHost, ApplicationInteraction applicationInteraction,
-            Func<DateTime> panelClock = null, IReminderPresenter reminderPresenter = null, IReminderTimer reminderTimer = null)
+            Func<DateTime> panelClock = null, IReminderPresenter reminderPresenter = null, IReminderTimer reminderTimer = null,
+            IFileLinkService fileLinkService = null)
         {
             this.store = store; this.windowed = windowed; this.preview = preview;
             if (session == null) throw new ArgumentNullException("session");
             if (startupManager == null) throw new ArgumentNullException("startupManager");
             if (applicationInteraction == null) throw new ArgumentNullException("applicationInteraction");
             this.session = session; this.startupManager = startupManager;
+            this.fileLinkService = fileLinkService ?? new WindowsFileLinkService();
             this.applicationInteraction = applicationInteraction;
             this.state = session.Snapshot();
             Title = "桌面待办"; WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
@@ -82,6 +85,7 @@ namespace CornerTodo
                     return Execute(delegate { session.SetCompleted(item.Id, completed); }, "保存失败，修改尚未保存。", true);
                 },
                 Edit = Edit, EditNotes = delegate(TodoItem item) { EditTask(item, true); },
+                OpenFiles = OpenFileLinks,
                 SetSortMode = delegate(TaskSortMode mode) {
                     return Execute(delegate { session.SetSortMode(mode); }, "排序方式未保存。", true);
                 },
@@ -390,7 +394,7 @@ namespace CornerTodo
                 delegate(TodoItem item, bool completed) {
                     if (disposed || HostLost || applicationInteraction.IsBusy) return false;
                     return Execute(delegate { session.SetCompleted(item.Id, completed); }, "完成状态未保存。", true);
-                });
+                }, OpenFileLinks);
             Rect area = DesktopHost.WorkArea(this);
             FitWindowToWorkArea(calendar, area);
             calendar.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -426,7 +430,7 @@ namespace CornerTodo
                 delegate(int hours) {
                     if (disposed || HostLost || applicationInteraction.IsBusy) return false;
                     return Execute(delegate { session.SetQuadrantUrgentHours(hours); }, "紧急范围未保存。", true);
-                });
+                }, OpenFileLinks);
             Rect area = DesktopHost.WorkArea(this);
             FitWindowToWorkArea(window, area);
             window.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -450,6 +454,64 @@ namespace CornerTodo
             if (quadrantWindow != null) quadrantWindow.Refresh(state, now, appearancePreview);
         }
 
+        private void OpenFileLinks(TodoItem item, FrameworkElement anchor)
+        {
+            if (disposed || HostLost || applicationInteraction.IsBusy || item == null) return;
+            TodoItem current = state.Items.FirstOrDefault(candidate => candidate.Id == item.Id);
+            if (current == null) return;
+            Window parent = anchor == null ? null : Window.GetWindow(anchor);
+            if (parent == this) parent = null;
+            applicationInteraction.EditorOpen = true; interaction.StopAnimation(); RevealFromEdge();
+            try {
+                var files = new FileLinksWindow(current, delegate(System.Collections.Generic.List<string> links) {
+                    if (disposed || HostLost) return false;
+                    return TrySaveFileLinks(current.Id, links);
+                }, fileLinkService);
+                files.Refresh(current, appearancePreview ?? state.Settings.Appearance);
+                Rect area = DesktopHost.WorkArea(parent ?? this);
+                FitWindowToWorkArea(files, area);
+                Rect target = DesktopHost.GetBounds(parent ?? this);
+                if (anchor != null && anchor.IsVisible) {
+                    PresentationSource source = PresentationSource.FromVisual(anchor);
+                    if (source != null && source.CompositionTarget != null) {
+                        Matrix fromDevice = source.CompositionTarget.TransformFromDevice;
+                        target = new Rect(fromDevice.Transform(anchor.PointToScreen(new Point(0, 0))),
+                            fromDevice.Transform(anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight))));
+                    }
+                }
+                PositionFileLinks(files, area, target);
+                using (applicationInteraction.EnterModal()) ShowChildDialog(files, parent);
+            }
+            catch (Exception error) { ShowStatus("未能打开相关文件。" + error.Message); }
+            finally { applicationInteraction.EditorOpen = false; ResumeAttention(); }
+        }
+
+        internal static void PositionFileLinks(Window child, Rect area, Rect anchor)
+        {
+            child.WindowStartupLocation = WindowStartupLocation.Manual;
+            double left = anchor.Right - child.Width;
+            double top = anchor.Bottom + 6;
+            if (top + child.Height > area.Bottom - 12) top = anchor.Top - child.Height - 6;
+            child.Left = Math.Max(area.Left + 12, Math.Min(left, area.Right - child.Width - 12));
+            child.Top = Math.Max(area.Top + 12, Math.Min(top, area.Bottom - child.Height - 12));
+        }
+
+        internal bool TrySaveFileLinks(string taskId, System.Collections.Generic.IEnumerable<string> links)
+        {
+            if (disposed || HostLost) return false;
+            // Only persistence failure may reject a saved association. A later
+            // presentation failure must not make the file window undo its list.
+            try { session.SetFileLinks(taskId, links); }
+            catch (Exception error) { ShowStatus("文件关联未保存。" + error.Message); return false; }
+            state = session.Snapshot();
+            try { Render(); }
+            catch (Exception error) {
+                Diagnostics.Log("File associations saved; task views failed to refresh: " + error);
+                ShowStatus("文件关联已保存，界面暂未刷新。请关闭文件列表后重试。");
+            }
+            return true;
+        }
+
         private void EditTask(TodoItem item, bool focusNotes, Window parent = null)
         {
             if (disposed || applicationInteraction.IsBusy) return;
@@ -466,7 +528,7 @@ namespace CornerTodo
                     }, "保存失败，输入仍保留在编辑窗口。", false);
                     if (saved) savedRecurrence = draft.Recurrence != null;
                     return saved;
-                }, null, item == null || String.IsNullOrEmpty(item.RecurringRuleId), state.Settings.QuadrantUrgentHours);
+                }, null, item == null || String.IsNullOrEmpty(item.RecurringRuleId), state.Settings.QuadrantUrgentHours, fileLinkService);
                 editor.SaveErrorProvider = delegate { return panel.StatusText.Text; };
                 Rect area = DesktopHost.WorkArea(parent ?? this);
                 FitWindowToWorkArea(editor, area);
@@ -544,6 +606,7 @@ namespace CornerTodo
             applicationInteraction.EditorOpen = true; interaction.StopAnimation(); RevealFromEdge();
             try {
                 var template = new TodoItem { Id = rule.Id, Text = rule.Text, Notes = rule.Notes, Priority = rule.Priority, IsImportant = rule.IsImportant,
+                    FileLinks = FileLinkRules.Copy(rule.FileLinks),
                     HasDeadline = rule.HasDeadline, HasTime = rule.HasTime,
                     ReminderEnabled = rule.ReminderEnabled, ReminderMinutesBefore = rule.ReminderMinutesBefore,
                     DueDate = rule.HasDeadline ? rule.Recurrence.StartDate.AddDays(rule.DeadlineOffsetDays).AddTicks(rule.DeadlineTimeTicks) : DateTime.MinValue };
@@ -563,7 +626,7 @@ namespace CornerTodo
                         };
                     }
                     return saved;
-                }, RecurringTasks.Copy(rule.Recurrence), true, state.Settings.QuadrantUrgentHours);
+                }, RecurringTasks.Copy(rule.Recurrence), true, state.Settings.QuadrantUrgentHours, fileLinkService);
                 editor.SaveErrorProvider = delegate { return saveError; };
                 FitRecurringWindow(editor);
                 if (ShowChildDialog(editor) == true) { state = session.Snapshot(); Render(); ShowStatus("后续规则已更新，已生成事项与完成历史保持原样。"); }

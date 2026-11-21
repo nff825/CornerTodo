@@ -125,7 +125,7 @@ internal static class RecurrenceTests
         var store = new TodoStore(Path.Combine(root, "important-periods"));
         store.Save(session.Snapshot());
         TodoState loaded = store.Load();
-        Assert(loaded.Version == 5 && loaded.RecurringRules.Single().IsImportant &&
+        Assert(loaded.Version == TodoState.CurrentVersion && loaded.RecurringRules.Single().IsImportant &&
             loaded.Items.Select(item => item.IsImportant).SequenceEqual(new[] { false, false, true }),
             "Repeated importance did not survive real persistence.");
     }

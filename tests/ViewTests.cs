@@ -48,8 +48,11 @@ internal static class ViewTests
             DeadlineCalendarUiTests.Run(args.Length == 0 ? null : args[0]);
             ImportanceEditorTests.Run();
             QuadrantUiTests.Run(args.Length == 0 ? null : args[0]);
+            FileLinkEditorTests.Run(args.Length == 0 ? null : args[0]);
+            FileLinkWindowTests.Run(args.Length == 0 ? null : args[0]);
+            FileLinkEntryTests.Run(args.Length == 0 ? null : args[0]);
             Console.WriteLine("PASS: " + groups + " view behavior groups, " + checks + " checks.");
-            Console.WriteLine("Real control trees and unshown windows; no Window.Show, store, session, Data or startup registration is used.");
+            Console.WriteLine("Real control trees and unshown windows; coordinator checks use a memory-only session. No Window.Show, production Data, startup registration or external file opening is used.");
             Console.WriteLine("Native double-click input still needs interactive verification; this test does not set nonpublic MouseButtonEventArgs state.");
             return 0;
         }

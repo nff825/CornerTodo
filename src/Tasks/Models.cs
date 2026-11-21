@@ -10,11 +10,12 @@ namespace CornerTodo
 
     public sealed class TodoItem
     {
-        public TodoItem() { Notes = ""; Priority = TaskPriority.Normal; HasDeadline = true; }
+        public TodoItem() { Notes = ""; FileLinks = new List<string>(); Priority = TaskPriority.Normal; HasDeadline = true; }
 
         public string Id { get; set; }
         public string Text { get; set; }
         public string Notes { get; set; }
+        public List<string> FileLinks { get; set; }
         public TaskPriority Priority { get; set; }
         public bool IsImportant { get; set; }
         public bool IsCompleted { get; set; }
@@ -67,7 +68,7 @@ namespace CornerTodo
 
     public sealed class TodoState
     {
-        public const int CurrentVersion = 5;
+        public const int CurrentVersion = 6;
 
         public TodoState()
         {

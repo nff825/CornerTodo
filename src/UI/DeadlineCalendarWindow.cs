@@ -20,6 +20,7 @@ namespace CornerTodo
         private static readonly string[] Weekdays = { "日", "一", "二", "三", "四", "五", "六" };
 
         private readonly Action<TodoItem> edit;
+        private readonly Action<TodoItem, FrameworkElement> openFiles;
         private readonly Func<TodoItem, bool, bool> setCompleted;
         private readonly Button previous, next, today, overdue, unscheduled;
         private readonly CheckBox includeCompleted;
@@ -40,9 +41,10 @@ namespace CornerTodo
         private Brush cellTint, selectedTint;
 
         internal DeadlineCalendarWindow(TodoState state, DateTime now, Action<TodoItem> edit,
-            Func<TodoItem, bool, bool> setCompleted)
+            Func<TodoItem, bool, bool> setCompleted, Action<TodoItem, FrameworkElement> openFiles = null)
         {
             this.edit = edit;
+            this.openFiles = openFiles;
             this.setCompleted = setCompleted;
             selectedDate = RecurringTasks.LocalDate(now);
             month = FirstOfMonth(selectedDate);
@@ -307,7 +309,7 @@ namespace CornerTodo
                 TodoItem item = items[index];
                 DetailRow row;
                 if (!rows.TryGetValue(item.Id, out row)) {
-                    row = new DetailRow(EditItem, ChangeCompletion);
+                    row = new DetailRow(EditItem, ChangeCompletion, openFiles);
                     rows.Add(item.Id, row);
                     detailRows.Children.Insert(index + 1, row.Surface);
                 } else if (!Object.ReferenceEquals(detailRows.Children[index + 1], row.Surface)) {
@@ -457,10 +459,12 @@ namespace CornerTodo
             internal readonly Border Surface;
             private readonly CheckBox complete;
             private readonly Button edit;
+            private readonly FileLinkEntry files;
             private readonly TextBlock title, caption;
             private TodoItem item;
 
-            internal DetailRow(Action<TodoItem> editItem, Action<TodoItem, bool> changeCompletion)
+            internal DetailRow(Action<TodoItem> editItem, Action<TodoItem, bool> changeCompletion,
+                Action<TodoItem, FrameworkElement> openFiles)
             {
                 var body = new Grid { Margin = new Thickness(0, 7, 0, 8) };
                 body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -483,13 +487,17 @@ namespace CornerTodo
                 edit = ActionButton("编辑", "编辑待办", delegate { editItem(item); });
                 edit.FontSize = 11; edit.Padding = new Thickness(5, 3, 5, 3); edit.MinHeight = 28;
                 edit.VerticalAlignment = VerticalAlignment.Top; edit.Margin = new Thickness(4, 0, 0, 0);
-                Grid.SetColumn(edit, 2); body.Children.Add(edit);
+                files = new FileLinkEntry(openFiles, "CalendarFiles_");
+                var actions = new StackPanel { Orientation = Orientation.Horizontal };
+                actions.Children.Add(files.Button); actions.Children.Add(edit);
+                Grid.SetColumn(actions, 2); body.Children.Add(actions);
                 Surface = new Border { Child = body, BorderThickness = new Thickness(0, 1, 0, 0) };
             }
 
             internal void Update(TodoItem value, DateTime now, bool showDate, PanelPalette palette)
             {
                 item = value;
+                files.Update(item, palette);
                 Surface.BorderBrush = palette.Separator;
                 complete.Style = palette.CheckStyle; complete.IsChecked = item.IsCompleted;
                 AutomationProperties.SetAutomationId(complete, "CalendarComplete_" + item.Id);

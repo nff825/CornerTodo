@@ -47,6 +47,7 @@ internal static class SessionTests
             Run("Failed undated and dated transitions leave committed state unchanged and retry cleanly", NoDeadlineSaveFailures);
             Run("Undated state survives real restart and legacy session migration never writes", NoDeadlinePersistence);
             QuadrantRulesTests.Run();
+            FileLinkTests.Run();
             Console.WriteLine("PASS: " + passed + " session behavior tests.");
             Console.WriteLine("No WPF, production Data or Windows startup registration is used.");
             return 0;
@@ -147,6 +148,7 @@ internal static class SessionTests
                 else candidate = 400.25 + index + variant;
             }
             else if (type == typeof(int)) candidate = 17 + variant + index;
+            else if (type == typeof(List<string>)) candidate = new List<string> { @"C:\copy-" + variant + @"\original.txt", "/tmp/copy-" + variant + "/source.txt" };
             else if (type.IsEnum) {
                 Array choices = Enum.GetValues(type); candidate = choices.GetValue(choices.Length > 1 ? 1 : 0);
             }

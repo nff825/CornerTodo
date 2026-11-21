@@ -154,6 +154,7 @@ namespace CornerTodo
                 items.Add(new Dictionary<string, object>
                 {
                     { "Id", item.Id }, { "Text", item.Text }, { "Notes", item.Notes ?? "" }, { "Priority", (int)item.Priority },
+                    { "FileLinks", FileLinkRules.Normalize(item.FileLinks) },
                     { "IsImportant", item.IsImportant }, { "IsCompleted", item.IsCompleted },
                     { "CreatedAt", DateText(item.CreatedAt) },
                     { "CompletedAt", item.CompletedAt.HasValue ? DateText(item.CompletedAt.Value) : null },
@@ -174,6 +175,7 @@ namespace CornerTodo
                 RecurrenceOptions repeat = rule.Recurrence;
                 rules.Add(new Dictionary<string, object> {
                     { "Id", rule.Id }, { "Text", rule.Text }, { "Notes", rule.Notes ?? "" }, { "Priority", (int)rule.Priority },
+                    { "FileLinks", FileLinkRules.Normalize(rule.FileLinks) },
                     { "IsImportant", rule.IsImportant },
                     { "HasDeadline", rule.HasDeadline }, { "HasTime", rule.HasTime },
                     { "DeadlineOffsetDays", rule.DeadlineOffsetDays }, { "DeadlineTimeTicks", rule.DeadlineTimeTicks },
@@ -249,6 +251,7 @@ namespace CornerTodo
                     Id = RequiredString(item, "Id"),
                     Text = RequiredString(item, "Text"),
                     Notes = OptionalNotes(item),
+                    FileLinks = ReadFileLinks(item),
                     Priority = ReadPriority(item),
                     IsImportant = item.TryGetValue("IsImportant", out value) && value is bool && (bool)value,
                     CreatedAt = RequiredDate(item, "CreatedAt"),
@@ -280,6 +283,7 @@ namespace CornerTodo
                     IDictionary<string, object> repeat = AsObject(repeatValue, "周期设置");
                     var rule = new RecurringTaskRule {
                         Id = RequiredString(fields, "Id"), Text = RequiredString(fields, "Text"), Notes = OptionalNotes(fields),
+                        FileLinks = ReadFileLinks(fields),
                         Priority = (TaskPriority)Integer(fields, "Priority", 2), HasDeadline = Boolean(fields, "HasDeadline", false),
                         IsImportant = fields.TryGetValue("IsImportant", out value) && value is bool && (bool)value,
                         HasTime = Boolean(fields, "HasTime", false), DeadlineOffsetDays = Integer(fields, "DeadlineOffsetDays", 0),
@@ -329,6 +333,21 @@ namespace CornerTodo
             return state;
         }
 
+        private static List<string> ReadFileLinks(IDictionary<string, object> fields)
+        {
+            object value;
+            if (!fields.TryGetValue("FileLinks", out value) || value == null) return new List<string>();
+            if (!(value is IEnumerable) || value is string || value is IDictionary)
+                throw new InvalidDataException("关联文件列表无效，原数据已保留。");
+            var paths = new List<string>();
+            foreach (object entry in (IEnumerable)value)
+            {
+                if (entry != null && !(entry is string)) throw new InvalidDataException("关联文件路径须为字符串。");
+                paths.Add((string)entry);
+            }
+            return FileLinkRules.Normalize(paths);
+        }
+
         private static AppearanceSettings ReadAppearance(object value)
         {
             IDictionary<string, object> fields = value as IDictionary<string, object>;
@@ -370,6 +389,7 @@ namespace CornerTodo
                     throw new InvalidDataException("待办项缺少标识或内容。");
                 if (!ids.Add(item.Id)) throw new InvalidDataException("待办项标识重复。");
                 if (!Enum.IsDefined(typeof(TaskPriority), item.Priority)) throw new InvalidDataException("待办项优先级无效。");
+                FileLinkRules.Normalize(item.FileLinks);
                 if (item.CreatedAt == DateTime.MinValue || (item.HasDeadline && item.DueDate == DateTime.MinValue))
                     throw new InvalidDataException("待办项缺少创建时间或截止日期。");
                 if (!item.HasDeadline && (state.Version == 1 || item.DueDate != DateTime.MinValue || item.HasTime || item.DeadlineSetAt.HasValue))

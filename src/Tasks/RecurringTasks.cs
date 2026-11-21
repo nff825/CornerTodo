@@ -20,10 +20,11 @@ namespace CornerTodo
 
     public sealed class RecurringTaskRule
     {
-        public RecurringTaskRule() { Notes = ""; Priority = TaskPriority.Normal; Recurrence = new RecurrenceOptions(); PreparedOccurrences = new List<DateTime>(); }
+        public RecurringTaskRule() { Notes = ""; FileLinks = new List<string>(); Priority = TaskPriority.Normal; Recurrence = new RecurrenceOptions(); PreparedOccurrences = new List<DateTime>(); }
         public string Id { get; set; }
         public string Text { get; set; }
         public string Notes { get; set; }
+        public List<string> FileLinks { get; set; }
         public TaskPriority Priority { get; set; }
         public bool IsImportant { get; set; }
         public bool HasDeadline { get; set; }
@@ -66,6 +67,7 @@ namespace CornerTodo
         {
             if (source == null) throw new ArgumentNullException("source");
             return new RecurringTaskRule { Id = source.Id, Text = source.Text, Notes = source.Notes,
+                FileLinks = FileLinkRules.Copy(source.FileLinks),
                 Priority = source.Priority, IsImportant = source.IsImportant, HasDeadline = source.HasDeadline, HasTime = source.HasTime,
                 DeadlineOffsetDays = source.DeadlineOffsetDays, DeadlineTimeTicks = source.DeadlineTimeTicks,
                 Recurrence = Copy(source.Recurrence), IsPaused = source.IsPaused, IsStopped = source.IsStopped,
@@ -90,6 +92,7 @@ namespace CornerTodo
             if (rule == null || String.IsNullOrWhiteSpace(rule.Id) || String.IsNullOrWhiteSpace(rule.Text))
                 throw new ArgumentException("重复规则缺少标识或事项。");
             Validate(rule.Recurrence);
+            FileLinkRules.Normalize(rule.FileLinks);
             if (!Enum.IsDefined(typeof(TaskPriority), rule.Priority)) throw new ArgumentException("重复规则优先级无效。");
             if (rule.DeadlineOffsetDays < 0 || rule.DeadlineOffsetDays > 3652058 || rule.DeadlineTimeTicks < 0 || rule.DeadlineTimeTicks >= TimeSpan.TicksPerDay)
                 throw new ArgumentException("重复事项截止间隔无效。");

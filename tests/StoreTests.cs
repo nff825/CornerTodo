@@ -56,7 +56,7 @@ internal static class StoreTests
             Run("Cloning and normalization isolate live appearance from draft edits", AppearanceCloneIsolation);
             Run("Optional text scale defaults independently and accepts supported saved values", TextScaleReadCompatibility);
             Run("Text scale saves with existing data version and repairs invalid fields independently", TextScalePersistence);
-            Run("Legacy importance defaults false and migrates to schema five only on save", ImportanceCompatibility);
+            Run("Legacy importance defaults false and migrates to the current schema only on save", ImportanceCompatibility);
             Run("Quadrant thresholds and independent importance persist and repair optional fields", QuadrantPersistence);
             Run("Version-one files load optional task fields without rewriting or losing data", TaskDetailsMigration);
             Run("Notes, priority and sort preference survive restart and clearing notes", TaskDetailsRoundTrip);
@@ -911,7 +911,7 @@ internal static class StoreTests
 
     private static void ImportanceCompatibility()
     {
-        Assert(TodoState.CurrentVersion == 5, "Independent importance must be protected by schema version five.");
+        Assert(TodoState.CurrentVersion >= 5, "Independent importance must be protected by schema version five or later.");
         for (int version = 1; version <= 4; version++) {
             TodoStore store = Store("importance-legacy-" + version);
             Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
@@ -927,8 +927,8 @@ internal static class StoreTests
             Assert(store.LoadWarning == null && saved.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Legacy importance migration rewrote or recovered the source file.");
             store.Save(loaded);
             TodoState restarted = store.Load();
-            Assert(restarted.Version == 5 && !restarted.Items[0].IsImportant &&
-                File.ReadAllText(store.DataFilePath).Contains("\"Version\":5"), "Explicit save did not migrate legacy importance to schema five.");
+            Assert(restarted.Version == TodoState.CurrentVersion && !restarted.Items[0].IsImportant &&
+                File.ReadAllText(store.DataFilePath).Contains("\"Version\":" + TodoState.CurrentVersion), "Explicit save did not migrate legacy importance to the current schema.");
         }
     }
 
@@ -947,7 +947,7 @@ internal static class StoreTests
             TodoState loaded = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
             Assert(loaded.Items.Single().IsImportant && loaded.Items.Single().Priority == TaskPriority.Low &&
                 loaded.RecurringRules.Single().IsImportant && loaded.RecurringRules.Single().Priority == TaskPriority.Low &&
-                loaded.Settings.QuadrantUrgentHours == hours && loaded.Settings.Appearance.TextScale == 1.3 && loaded.Version == 5,
+                loaded.Settings.QuadrantUrgentHours == hours && loaded.Settings.Appearance.TextScale == 1.3 && loaded.Version == TodoState.CurrentVersion,
                 "Importance or quadrant threshold was lost on restart or changed another setting.");
         }
         string valid = File.ReadAllText(store.DataFilePath);

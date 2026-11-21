@@ -92,6 +92,8 @@ namespace CornerTodo
             titleLine.Children.Add(text);
             var details = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(7, 1, 0, 0) };
+            var files = new FileLinkEntry(actions.OpenFiles, "TaskFiles_");
+            files.Update(item, palette); details.Children.Add(files.Button);
             var priorityText = Theme.Text(TodoRules.PriorityLabel(item.Priority), 10 * palette.TextScale,
                 item.Priority == TaskPriority.High && !item.IsCompleted ? palette.Ink : palette.Muted);
             if (item.Priority == TaskPriority.High && !item.IsCompleted) priorityText.FontWeight = FontWeights.SemiBold;
@@ -156,6 +158,9 @@ namespace CornerTodo
             toggle.Click += delegate { if (actions.SetCompleted != null) actions.SetCompleted(item, !item.IsCompleted); };
             var delete = new MenuItem { Header = repeated ? "删除本次事项…" : "删除" }; delete.Click += delegate { if (actions.Delete != null) actions.Delete(item); };
             menu.Items.Add(edit); menu.Items.Add(toggle);
+            var relatedFiles = new MenuItem { Header = "相关文件…" };
+            relatedFiles.Click += delegate { if (actions.OpenFiles != null) actions.OpenFiles(item, row); };
+            menu.Items.Add(relatedFiles);
             RecurringTaskRule rule;
             if (repeated && recurringRules.TryGetValue(item.RecurringRuleId, out rule) && !rule.IsStopped) {
                 var editRule = new MenuItem { Header = "修改后续重复规则" };

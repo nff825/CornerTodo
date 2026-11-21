@@ -15,6 +15,7 @@ namespace CornerTodo
     {
         private readonly Action add;
         private readonly Action<TodoItem> edit;
+        private readonly Action<TodoItem, FrameworkElement> openFiles;
         private readonly Func<TodoItem, bool, bool> setCompleted;
         private readonly Func<int, bool> setUrgentHours;
         private readonly TextBlock summary, rangeLabel, rule, status, hint;
@@ -31,9 +32,11 @@ namespace CornerTodo
         private bool updating;
 
         internal QuadrantWindow(TodoState state, DateTime now, Action add, Action<TodoItem> edit,
-            Func<TodoItem, bool, bool> setCompleted, Func<int, bool> setUrgentHours)
+            Func<TodoItem, bool, bool> setCompleted, Func<int, bool> setUrgentHours,
+            Action<TodoItem, FrameworkElement> openFiles = null)
         {
             this.add = add; this.edit = edit;
+            this.openFiles = openFiles;
             this.setCompleted = setCompleted; this.setUrgentHours = setUrgentHours;
             Title = "CornerTodo · 四象限";
             Width = 1160; Height = 750; MinWidth = 460; MinHeight = 340;
@@ -186,7 +189,7 @@ namespace CornerTodo
                     TodoItem item = ordered[position];
                     TaskRow row;
                     if (!rows.TryGetValue(item.Id, out row)) {
-                        row = new TaskRow(EditItem, CompleteItem);
+                        row = new TaskRow(EditItem, CompleteItem, openFiles);
                         rows.Add(item.Id, row);
                     }
                     Panel currentParent = row.Surface.Parent as Panel;
@@ -332,9 +335,11 @@ namespace CornerTodo
             private readonly CheckBox complete;
             private readonly TextBlock title, deadline;
             private readonly Button edit;
+            private readonly FileLinkEntry files;
             private TodoItem item;
 
-            internal TaskRow(Action<TodoItem> editItem, Action<TodoItem, bool> setCompleted)
+            internal TaskRow(Action<TodoItem> editItem, Action<TodoItem, bool> setCompleted,
+                Action<TodoItem, FrameworkElement> openFiles)
             {
                 var row = new Grid { Margin = new Thickness(0, 8, 0, 9) };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -355,13 +360,18 @@ namespace CornerTodo
                 Grid.SetColumn(text, 1); row.Children.Add(text);
                 edit = new Button { Content = "编辑", Padding = new Thickness(6, 4, 6, 4), FontSize = 12,
                     Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
-                edit.Click += delegate { editItem(item); }; Grid.SetColumn(edit, 2); row.Children.Add(edit);
+                edit.Click += delegate { editItem(item); };
+                files = new FileLinkEntry(openFiles, "QuadrantFiles_");
+                var actions = new StackPanel { Orientation = Orientation.Horizontal };
+                actions.Children.Add(files.Button); actions.Children.Add(edit);
+                Grid.SetColumn(actions, 2); row.Children.Add(actions);
                 Surface = new Border { Child = row, BorderThickness = new Thickness(0, 0, 0, 1) };
             }
 
             internal void Update(TodoItem item, DateTime now, PanelPalette palette, bool urgent)
             {
                 this.item = item;
+                files.Update(item, palette);
                 AutomationProperties.SetAutomationId(Surface, "QuadrantRow_" + item.Id);
                 AutomationProperties.SetAutomationId(complete, "QuadrantComplete_" + item.Id);
                 AutomationProperties.SetAutomationId(edit, "QuadrantEdit_" + item.Id);

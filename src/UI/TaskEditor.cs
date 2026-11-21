@@ -29,6 +29,7 @@ namespace CornerTodo
         private readonly TextBox notes;
         private readonly Expander notesSection;
         private readonly TextBlock notesCount;
+        private readonly FileLinksEditor fileLinksEditor;
         private readonly RadioButton highPriority;
         private readonly RadioButton normalPriority;
         private readonly RadioButton lowPriority;
@@ -62,7 +63,7 @@ namespace CornerTodo
             : this(item, focusNotes, saveDraft, null, item == null || String.IsNullOrEmpty(item.RecurringRuleId)) { }
 
         internal TaskEditor(TodoItem item, bool focusNotes, Func<TaskDraft, bool> saveDraft,
-            RecurrenceOptions initialRecurrence, bool allowRecurrence, int urgentHours = 24)
+            RecurrenceOptions initialRecurrence, bool allowRecurrence, int urgentHours = 24, IFileLinkService fileLinkService = null)
         {
             original = item;
             this.saveDraft = saveDraft;
@@ -72,7 +73,7 @@ namespace CornerTodo
             editingRule = initialRecurrence != null;
             Title = editingRule ? "修改后续重复规则" : item == null ? "添加待办" : "编辑待办";
             bool showNotes = focusNotes || (item != null && !String.IsNullOrEmpty(item.Notes));
-            fullEditorHeight = (showNotes ? 690 : 535) + (allowRecurrence ? 36 : 26) + 40 + 112;
+            fullEditorHeight = (showNotes ? 690 : 535) + (allowRecurrence ? 36 : 26) + 40 + 112 + 32;
             Width = 460; Height = fullEditorHeight - (item != null && !item.HasDeadline ? 85 : 0);
             MinWidth = 320; MinHeight = 300;
             ResizeMode = ResizeMode.NoResize;
@@ -253,6 +254,14 @@ namespace CornerTodo
                 Margin = new Thickness(0, 18, 0, 0), Foreground = Theme.Ink, FontSize = 13 };
             AutomationProperties.SetName(notesSection, "展开或收起备注"); fields.Children.Add(notesSection);
             notes.TextChanged += delegate { UpdateNotesCount(); }; UpdateNotesCount();
+
+            fileLinksEditor = new FileLinksEditor(item == null ? null : item.FileLinks,
+                fileLinkService ?? new WindowsFileLinkService(), delegate { return this; });
+            fields.Children.Add(fileLinksEditor);
+            fileLinksEditor.Expanded += delegate { UpdateEditorHeight(); };
+            fileLinksEditor.Collapsed += delegate { UpdateEditorHeight(); };
+            fileLinksEditor.LinksChanged += delegate { UpdateEditorHeight(); };
+            UpdateEditorHeight();
 
             var quadrantRow = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
             var quadrantLabel = Theme.Text("归类预览", 12, Theme.Muted);
@@ -488,6 +497,7 @@ namespace CornerTodo
             double extra = useRecurrence != null && useRecurrence.IsChecked == true ? (recurrenceFrequency != null && recurrenceFrequency.SelectedIndex == 0 ? 118 : 172) : 0;
             if (reminderFields != null && reminderFields.Visibility == Visibility.Visible) extra += 92;
             if (reminderAvailability != null && reminderAvailability.Visibility == Visibility.Visible) extra += 18;
+            if (fileLinksEditor != null && fileLinksEditor.IsExpanded) extra += Math.Min(220, 84 + fileLinksEditor.FileLinks.Count * 64);
             Height = Math.Max(MinHeight, Math.Min(MaxHeight, fullEditorHeight - (useDeadline.IsChecked == true ? 0 : 85) + extra));
         }
 
@@ -580,7 +590,7 @@ namespace CornerTodo
                 error.Text = "提前时长超出可用日期范围，请减少。"; reminderDays.Focus(); return;
             }
             var draft = new TaskDraft { Text = text, HasDeadline = hasDeadline, DueDate = due, HasTime = hasTime, Notes = notes.Text, Priority = priority, Recurrence = recurrence,
-                IsImportant = important.IsChecked == true, ReminderEnabled = reminderEnabled, ReminderMinutesBefore = reminderEnabled ? reminderLead : 0 };
+                FileLinks = fileLinksEditor.FileLinks, IsImportant = important.IsChecked == true, ReminderEnabled = reminderEnabled, ReminderMinutesBefore = reminderEnabled ? reminderLead : 0 };
             // Keep the editable fields open until persistence succeeds, so a
             // transient disk failure cannot discard a long note or other input.
             if (saveDraft != null && !saveDraft(draft))

@@ -20,6 +20,7 @@ namespace CornerTodo
         public Func<TodoItem, bool, bool> SetCompleted { get; set; }
         public Action<TodoItem> Edit { get; set; }
         public Action<TodoItem> EditNotes { get; set; }
+        public Action<TodoItem, FrameworkElement> OpenFiles { get; set; }
         public Func<TaskSortMode, bool> SetSortMode { get; set; }
         public Action<TodoItem> Delete { get; set; }
         public Action<TodoItem> EditRecurringRule { get; set; }

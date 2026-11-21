@@ -31,6 +31,7 @@ namespace CornerTodo
             if (item == null) throw new ArgumentNullException("item");
             return new TodoItem {
                 Id = item.Id, Text = item.Text, Notes = item.Notes, Priority = item.Priority, IsImportant = item.IsImportant,
+                FileLinks = FileLinkRules.Copy(item.FileLinks),
                 IsCompleted = item.IsCompleted,
                 CreatedAt = item.CreatedAt, CompletedAt = item.CompletedAt,
                 DueDate = item.DueDate, HasDeadline = item.HasDeadline, HasTime = item.HasTime, DeadlineSetAt = item.DeadlineSetAt,
