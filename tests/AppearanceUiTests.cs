@@ -45,8 +45,10 @@ internal static class AppearanceUiTests
             ValidateUnifiedControls();
             ValidateBackgroundOnlyTransparency();
             ValidateAttentionTheme();
+            ValidateTextScaleRendering();
             ValidatePreviewSaveAndFailure();
             ValidateEditorInteractions();
+            ValidateTextScaleEditor();
             Report.AppendLine("PASS: " + assertions + " assertions.");
             Report.AppendLine("Scope: production control tree, rendered pixels, preview isolation, saved state, failed-save rollback and editor callbacks.");
             Report.AppendLine("Actual desktop composition, modal OS color selection and native mouse input require a separate interactive check.");
@@ -328,23 +330,29 @@ internal static class AppearanceUiTests
             string unchanged = StateWithoutAppearance(window.CurrentState);
             AppearanceSettings committed = window.CurrentState.Settings.Appearance.Clone();
             AppearanceSettings draft = AppearanceSettings.CreateDark();
+            draft.TextScale = 1.25;
             Preview(window, draft);
             CheckPanel(window, draft);
+            CheckTaskTextScale(window, 1.25);
             Assert(window.CurrentState.Settings.Appearance.Matches(committed), "Preview replaced committed appearance state.");
             Assert(File.ReadAllBytes(store.DataFilePath).SequenceEqual(originalBytes), "Preview wrote the data file.");
             Assert(StateWithoutAppearance(window.CurrentState) == unchanged, "Preview changed a task, deadline or baseline setting.");
             draft.BackgroundColor = "#112233";
+            draft.TextScale = 1.5;
             Assert(window.CurrentState.Settings.Appearance.Matches(committed), "The draft aliases committed settings.");
             Invoke(window, "Render");
             CheckPanel(window, AppearanceSettings.CreateDark());
+            CheckTaskTextScale(window, 1.25);
 
             // Exercise the same restoration entry point used by the editor's finally path.
             Invoke(window, "CancelAppearancePreview");
             CheckPanel(window, committed);
+            CheckTaskTextScale(window, committed.TextScale);
             Assert(File.ReadAllBytes(store.DataFilePath).SequenceEqual(originalBytes), "Restoring a preview wrote data.");
 
             AppearanceSettings selected = AppearanceSettings.CreateDark();
             selected.BackgroundTransparency = 37;
+            selected.TextScale = 1.3;
             Assert(Save(window, selected), "Saving a valid appearance failed.");
             Assert(window.CurrentState.Settings.Appearance.Matches(selected), "Successful save did not commit the selected appearance.");
             Assert(store.Load().Settings.Appearance.Matches(selected), "Appearance did not survive loading from disk.");
@@ -352,10 +360,21 @@ internal static class AppearanceUiTests
             Assert(StateWithoutAppearance(window.CurrentState) == unchanged, "Saving appearance changed tasks or baseline geometry.");
             Assert(File.Exists(store.DataFilePath + ".bak"), "Saving appearance did not retain the previous data backup.");
             CheckPanel(window, selected);
+            CheckTaskTextScale(window, 1.3);
+
+            MainWindow reopened = new MainWindow(store, store.Load(), true, false);
+            try
+            {
+                CheckPanel(reopened, selected);
+                CheckTaskTextScale(reopened, 1.3);
+                AssertNoHandle(reopened);
+            }
+            finally { reopened.Close(); }
 
             byte[] savedBytes = File.ReadAllBytes(store.DataFilePath);
             AppearanceSettings saved = window.CurrentState.Settings.Appearance.Clone();
             AppearanceSettings rejected = AppearanceSettings.CreateLight(); rejected.BackgroundColor = "#EEDDCC";
+            rejected.TextScale = 0.9;
             Preview(window, rejected);
             using (FileStream locked = new FileStream(store.DataFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
@@ -364,6 +383,7 @@ internal static class AppearanceUiTests
                 Assert(StateWithoutAppearance(window.CurrentState) == unchanged, "Failed save changed tasks or baseline geometry.");
                 Assert(File.ReadAllBytes(store.DataFilePath).SequenceEqual(savedBytes), "Failed save altered the previous data file.");
                 CheckPanel(window, saved);
+                CheckTaskTextScale(window, saved.TextScale);
             }
             Assert(store.Load().Settings.Appearance.Matches(saved), "Failed save changed the reloadable appearance.");
             Invoke(window, "CancelAppearancePreview");
@@ -373,6 +393,7 @@ internal static class AppearanceUiTests
             Assert(StateWithoutAppearance(clone) == unchanged, "A current-state snapshot lost task or geometry fields.");
             Assert(!Object.ReferenceEquals(clone.Settings.Appearance, window.CurrentState.Settings.Appearance), "A current-state snapshot shares appearance settings.");
             clone.Settings.Appearance.BackgroundColor = "#010203";
+            clone.Settings.Appearance.TextScale = 1.5;
             clone.Settings.Width = 1;
             clone.Items[0].Text = "snapshot-only edit";
             clone.Items.Clear();
@@ -382,7 +403,79 @@ internal static class AppearanceUiTests
             AssertNoHandle(window);
         }
         finally { window.Close(); }
-        Report.AppendLine("Persistence: preview and restore leave bytes unchanged; save persists an independent value; locked-file failure rolls back display/model/disk; current-state snapshots isolate tasks, appearance and baseline fields.");
+        Report.AppendLine("Persistence: color/text-scale preview and restore leave bytes unchanged; save survives a new window loaded from disk; locked-file failure rolls back display/model/disk; snapshots isolate tasks, appearance and baseline fields.");
+    }
+
+    private static void ValidateTextScaleRendering()
+    {
+        DateTime now = new DateTime(2026, 11, 20, 14, 0, 0);
+        double[] scales = { 0.9, 1.25, 1.5 };
+        foreach (double scale in scales)
+        {
+            TodoState state = new TodoState();
+            state.Settings.Width = 430; state.Settings.Height = 710; state.Settings.AutoExpand = false;
+            state.Settings.Appearance.TextScale = scale;
+            state.Items.Add(new TodoItem { Id = "scale-overdue", Text = "提交报销材料", DueDate = now.AddDays(-1),
+                HasTime = true, CreatedAt = now.AddDays(-3), DeadlineSetAt = now.AddDays(-3) });
+            state.Items.Add(new TodoItem { Id = "scale-urgent", Text = "向李老师汇报研究进展", DueDate = now.AddHours(3),
+                HasTime = true, Priority = TaskPriority.High, CreatedAt = now.AddDays(-2), DeadlineSetAt = now.AddDays(-2) });
+            state.Items.Add(new TodoItem { Id = "scale-normal", Text = "整理实验数据", DueDate = now.Date.AddDays(1),
+                CreatedAt = now.AddDays(-2), DeadlineSetAt = now.AddDays(-2) });
+            state.Items.Add(new TodoItem { Id = "scale-unscheduled", Text = "阅读两篇参考文献", HasDeadline = false,
+                Priority = TaskPriority.Low, CreatedAt = now.AddDays(-1) });
+            state.Items.Add(new TodoItem { Id = "scale-completed", Text = "归档会议纪要", DueDate = now.AddDays(-2),
+                IsCompleted = true, CompletedAt = now.AddHours(-1), CreatedAt = now.AddDays(-3) });
+            MainWindow window = new MainWindow(new TodoStore(Path.Combine(isolatedRoot, "scale-render-" + scale.ToString("0.##", CultureInfo.InvariantCulture))),
+                state, true, true);
+            try
+            {
+                window.Panel.Render(state, now, true, state.Settings.Appearance);
+                RenderWindow(window, scale == 1.25 ? "text-scale-panel-125.png" : null, true);
+                var titles = new List<TextBlock>();
+                foreach (TodoItem item in state.Items)
+                {
+                    Grid row = Descendants(window.Panel.Surface).OfType<Grid>().Single(grid => Object.Equals(grid.Tag, item.Id));
+                    TextBlock title = Descendants(row).OfType<TextBlock>().Single(text => text.Text == item.Text);
+                    double baseSize = item.Id == "scale-overdue" ? 21 : item.Id == "scale-urgent" ? 19 : 15;
+                    Near(baseSize * scale, title.FontSize, "Scaled task hierarchy: " + item.Id);
+                    titles.Add(title);
+                    TextBlock date = Descendants(row).OfType<TextBlock>().Single(text => Object.Equals(text.Tag, "deadline"));
+                    Near((item.Id == "scale-overdue" || item.Id == "scale-urgent" ? 13 : 12) * scale,
+                        date.FontSize, "Scaled task date: " + item.Id);
+                    if (item.Id == "scale-overdue" || item.Id == "scale-urgent")
+                    {
+                        Assert(title.FontWeight == FontWeights.SemiBold, "Scaling removed attention emphasis.");
+                        Assert(date.Text.Contains(item.Id == "scale-overdue" ? "已逾期" : "剩余"),
+                            "Scaling removed a textual attention state.");
+                    }
+                    if (item.IsCompleted)
+                        Assert(title.TextDecorations != null && title.TextDecorations.Any(decoration => decoration.Location == TextDecorationLocation.Strikethrough),
+                            "Scaling removed completed-task strikethrough.");
+                }
+                Assert(titles[0].FontSize > titles[1].FontSize && titles[1].FontSize > titles[2].FontSize,
+                    "The overdue, urgent and ordinary task hierarchy collapsed at a scale endpoint.");
+                Near(25, window.Panel.TitleText.FontSize, "The panel heading should keep its fixed size");
+
+                window.Width = 320; window.Height = 360;
+                state.Items[2].Text = "整理全部实验数据并核对原始记录，确认每一组测量结果以及对应的图表编号，补充说明后再提交研究小组审阅。";
+                for (int index = 0; index < 10; index++)
+                    state.Items.Add(new TodoItem { Id = "scale-extra-" + index, Text = "后续事项 " + (index + 1) + "：核对测量记录与分析结果",
+                        DueDate = now.Date.AddDays(3), CreatedAt = now, DeadlineSetAt = now });
+                window.Panel.Render(state, now, true, state.Settings.Appearance);
+                RenderWindow(window, null, true);
+                TextBlock longText = Descendants(window.Panel.Surface).OfType<TextBlock>().Single(text => text.Text == state.Items[2].Text);
+                Assert(longText.TextWrapping == TextWrapping.Wrap && longText.ActualHeight > longText.FontSize * 2,
+                    "Long scaled task text did not wrap in the narrow panel.");
+                Assert(window.Panel.Scroll.ScrollableHeight > 0 && window.Panel.Scroll.HorizontalScrollBarVisibility == ScrollBarVisibility.Disabled,
+                    "Long scaled rows did not keep a vertical-only scroll range.");
+                window.Panel.Scroll.ScrollToBottom();
+                RenderWindow(window, null, true);
+                Near(window.Panel.Scroll.ScrollableHeight, window.Panel.Scroll.VerticalOffset, "Scrolling to the bottom of long scaled rows");
+                AssertNoHandle(window);
+            }
+            finally { window.Close(); }
+        }
+        Report.AppendLine("Text scale rendering: 90%, 125% and 150% retain ordinary/urgent/overdue size hierarchy, proportional dates, completion marks, fixed headings and narrow-panel long-text scrolling.");
     }
 
     private static void ValidateEditorInteractions()
@@ -447,9 +540,11 @@ internal static class AppearanceUiTests
         {
             RenderWindow(failed, null, false);
             failed.SelectPreset("dark");
+            Find<Slider>(failed, "文字大小").Value = 150;
             Click(Find<Button>(failed, "保存外观设置"), false);
             Assert(failedCalls == 1, "Save failure callback was not invoked exactly once.");
-            Assert(failed.CurrentAppearance.Matches(AppearanceSettings.CreateDark()), "Failed editor save discarded the editable draft.");
+            AppearanceSettings failedDraft = AppearanceSettings.CreateDark(); failedDraft.TextScale = 1.5;
+            Assert(failed.CurrentAppearance.Matches(failedDraft), "Failed editor save discarded the editable color/text-scale draft.");
             TextBlock failureMessage = Find<TextBlock>(failed, "外观设置错误提示");
             Assert(failureMessage.Visibility == Visibility.Visible && failureMessage.Text.Contains("保存失败"),
                 "A failed save should leave a visible explanation in the editor.");
@@ -464,6 +559,7 @@ internal static class AppearanceUiTests
         {
             RenderWindow(cancelled, null, false);
             cancelled.SelectPreset("dark");
+            Find<Slider>(cancelled, "文字大小").Value = 125;
             Click(Find<Button>(cancelled, "取消外观设置"), true);
             Assert(cancelSaves == 0, "Cancel invoked the save callback.");
             Assert(original.Matches(AppearanceSettings.CreateLight()), "Cancel mutated the committed input.");
@@ -471,6 +567,93 @@ internal static class AppearanceUiTests
         }
         finally { cancelled.Close(); }
         Report.AppendLine("Editor: preset buttons, slider, valid/invalid HEX, save success/failure and cancel callbacks passed on unshown windows.");
+    }
+
+    private static void ValidateTextScaleEditor()
+    {
+        AppearanceSettings original = AppearanceSettings.CreateLight(); original.TextScale = 1.25;
+        var previews = new List<AppearanceSettings>();
+        AppearanceEditor editor = new AppearanceEditor(original,
+            delegate(AppearanceSettings value) { previews.Add(value); }, delegate { return true; });
+        try
+        {
+            RenderWindow(editor, null, false);
+            Slider scale = Find<Slider>(editor, "文字大小");
+            Near(90, scale.Minimum, "Text scale slider minimum");
+            Near(150, scale.Maximum, "Text scale slider maximum");
+            Near(125, scale.Value, "Saved text scale slider value");
+            Assert(Find<TextBlock>(editor, "文字大小数值").Text == "125%", "The text scale label does not show the saved percentage.");
+            Assert(Find<Button>(editor, "预设：清晰浅色").BorderThickness.Left == 2,
+                "A custom text scale cleared the matching light color preset selection.");
+            Near(14, editor.FontSize, "The appearance editor's own text scale");
+            Near(28, Descendants((DependencyObject)editor.Content).OfType<TextBlock>().Single(text => text.Text == "外观设置").FontSize,
+                "The appearance heading should keep its original size");
+            AppearanceSettings clone = editor.CurrentAppearance; clone.TextScale = 0.9;
+            Near(1.25, editor.CurrentAppearance.TextScale, "The editor exposes the mutable text-scale draft");
+
+            scale.Value = 150;
+            Near(1.5, editor.CurrentAppearance.TextScale, "Text scale slider callback");
+            Assert(previews.Count > 0, "The text scale slider did not send a preview.");
+            Near(1.5, previews.Last().TextScale, "Text scale preview value");
+            previews.Last().TextScale = 0.9;
+            Near(1.5, editor.CurrentAppearance.TextScale, "The preview callback aliases the current text-scale draft");
+
+            foreach (string name in new[] { "清晰深色", "原版通透", "清晰浅色" })
+            {
+                Button preset = Find<Button>(editor, "预设：" + name);
+                Click(preset, false);
+                Near(1.5, editor.CurrentAppearance.TextScale, "Changing a color preset reset text scale");
+                Near(150, scale.Value, "Changing a color preset reset the text scale control");
+                Assert(preset.BorderThickness.Left == 2, "The active color preset is not selected at 150% text scale.");
+            }
+            Assert(editor.TrySetColor("primary", "#274F63"), "The custom color used for reset testing was rejected.");
+            AppearanceSettings beforeReset = editor.CurrentAppearance;
+            Click(Find<Button>(editor, "恢复100%"), false);
+            Near(1, editor.CurrentAppearance.TextScale, "Restore standard text scale");
+            Near(100, scale.Value, "Restore standard text scale slider");
+            Assert(editor.CurrentAppearance.PrimaryTextColor == beforeReset.PrimaryTextColor &&
+                editor.CurrentAppearance.BackgroundColor == beforeReset.BackgroundColor &&
+                editor.CurrentAppearance.BackgroundTransparency == beforeReset.BackgroundTransparency,
+                "Restoring standard text scale changed the chosen colors or transparency.");
+            Near(1, previews.Last().TextScale, "Restore standard text scale did not preview");
+
+            scale.Value = 90;
+            Near(0.9, editor.CurrentAppearance.TextScale, "Small text scale");
+            Click(Find<Button>(editor, "恢复默认"), false);
+            Assert(editor.CurrentAppearance.Matches(AppearanceSettings.CreateLight()), "Restore all defaults did not restore colors and 100% text scale.");
+            Near(100, scale.Value, "Restore all defaults slider value");
+            Near(1.25, original.TextScale, "Editing text scale changed the constructor input");
+
+            scale.Value = 125;
+            RenderWindow(editor, "editor-text-scale-125.png", false);
+            editor.Width = 440; editor.Height = 340;
+            RenderWindow(editor, null, false);
+            ScrollViewer body = Find<ScrollViewer>(editor, "外观设置内容");
+            Assert(body.ScrollableHeight > 0 && body.ViewportHeight > 0,
+                "The small appearance editor did not keep its settings in a scrollable body.");
+            foreach (string name in new[] { "取消外观设置", "保存外观设置", "恢复默认" })
+            {
+                Button button = Find<Button>(editor, name);
+                Rect bounds = button.TransformToAncestor((Visual)editor.Content).TransformBounds(new Rect(button.RenderSize));
+                Assert(button.Visibility == Visibility.Visible && bounds.Left >= 0 && bounds.Top >= 0 &&
+                    bounds.Right <= ((FrameworkElement)editor.Content).ActualWidth + 0.1 &&
+                    bounds.Bottom <= ((FrameworkElement)editor.Content).ActualHeight + 0.1,
+                    "The small appearance editor clipped its fixed footer action: " + name);
+            }
+            AssertNoHandle(editor);
+        }
+        finally { editor.Close(); }
+        Report.AppendLine("Text scale editor: 90-150% slider, isolated preview, color presets retain scale/selection, restore100% preserves colors, restore-all resets everything, fixed-size editor typography and small-window footer passed.");
+    }
+
+    private static void CheckTaskTextScale(MainWindow window, double scale)
+    {
+        TextBlock pending = Descendants(window.Panel.Surface).OfType<TextBlock>().Single(text => text.Text == "向李老师汇报研究进展");
+        Near(15 * scale, pending.FontSize, "The main task text did not use the selected scale");
+        TextBlock completed = Descendants(window.Panel.Surface).OfType<TextBlock>().Single(text => text.Text == "完成阶段实验记录归档");
+        Near(15 * scale, completed.FontSize, "Completed task text did not use the selected scale");
+        Assert(completed.TextDecorations != null && completed.TextDecorations.Any(decoration => decoration.Location == TextDecorationLocation.Strikethrough),
+            "Changing text scale removed completed-task strikethrough.");
     }
 
     private static void CheckPanel(MainWindow window, AppearanceSettings expected)

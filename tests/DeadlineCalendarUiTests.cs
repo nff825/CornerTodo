@@ -67,6 +67,16 @@ internal static class DeadlineCalendarUiTests
             Check(Find<CheckBox>(root, "CalendarComplete_undated") != null, "The undated entry did not open its task list.");
             window.Refresh(state, Now.AddSeconds(10));
             Check(Find<TextBlock>(root, "CalendarDetailTitle").Text == "未设截止", "A timed refresh discarded the current view.");
+            var large = state.Settings.Appearance.Clone(); large.TextScale = 1.5;
+            var undatedEdit = Find<Button>(root, "CalendarEdit_undated");
+            window.Refresh(state, Now, large);
+            TextBlock undatedTitle = Elements<TextBlock>(root).Single(text => text.Text == undated.Text);
+            Check(Math.Abs(undatedTitle.FontSize - 21) < 0.001, "A calendar preview did not scale task text.");
+            Check(Object.ReferenceEquals(undatedEdit, Find<Button>(root, "CalendarEdit_undated")), "A size preview recreated an unchanged task row.");
+            Check(Find<TextBlock>(root, "CalendarDetailTitle").Text == "未设截止" && state.Settings.Appearance.TextScale == 1,
+                "A size preview changed the selected view or committed the draft.");
+            window.Refresh(state, Now);
+            Check(Math.Abs(undatedTitle.FontSize - 14) < 0.001, "Cancelling a calendar size preview did not restore its text.");
 
             Click(Find<Button>(root, "CalendarToday"));
             Click(Find<Button>(root, "CalendarEdit_report"));
@@ -93,6 +103,16 @@ internal static class DeadlineCalendarUiTests
             data.DueDate = Now.Date.AddHours(17).AddMinutes(30);
             window.Refresh(state, Now);
             Click(Find<Button>(root, "CalendarToday"));
+            var selectedCell = Find<Button>(root, "CalendarDay_20261112");
+            state.Settings.Appearance.TextScale = 1.5;
+            window.Refresh(state, Now);
+            Check(Object.ReferenceEquals(selectedCell, Find<Button>(root, "CalendarDay_20261112")), "Changing saved text size replaced the date controls.");
+            Check(Elements<TextBlock>(selectedCell).Any(text => text.Text == "+1 项" && Math.Abs(text.FontSize - 15) < 0.001),
+                "Calendar overflow labels did not follow text size.");
+            Check(Elements<TextBlock>(root).Any(text => text.Text == "15:00 截止" && Math.Abs(text.FontSize - 18) < 0.001),
+                "Calendar deadline captions did not follow text size.");
+            state.Settings.Appearance.TextScale = 1;
+            window.Refresh(state, Now);
             if (!String.IsNullOrWhiteSpace(outputDirectory)) Render(window, outputDirectory);
         }
         finally { window.Close(); }

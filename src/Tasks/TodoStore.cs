@@ -207,7 +207,8 @@ namespace CornerTodo
                                 { "BackgroundTransparency", appearance.BackgroundTransparency },
                                 { "BackgroundColor", appearance.BackgroundColor },
                                 { "PrimaryTextColor", appearance.PrimaryTextColor },
-                                { "SecondaryTextColor", appearance.SecondaryTextColor }
+                                { "SecondaryTextColor", appearance.SecondaryTextColor },
+                                { "TextScale", appearance.TextScale }
                             }
                         }
                     }
@@ -333,6 +334,9 @@ namespace CornerTodo
             if (fields.TryGetValue("BackgroundColor", out field)) appearance.BackgroundColor = field as string;
             if (fields.TryGetValue("PrimaryTextColor", out field)) appearance.PrimaryTextColor = field as string;
             if (fields.TryGetValue("SecondaryTextColor", out field)) appearance.SecondaryTextColor = field as string;
+            if (fields.TryGetValue("TextScale", out field)
+                && (field is int || field is long || field is decimal || field is double))
+                appearance.TextScale = Convert.ToDouble(field, CultureInfo.InvariantCulture);
             return AppearanceSettings.Normalize(appearance);
         }
 

@@ -31,6 +31,7 @@ internal static class SessionTests
             Run("A store cannot corrupt committed state by mutating its save argument", StoreArgumentIsolation);
             Run("Every failed operation preserves state and can be retried", FailedOperations);
             Run("Independent settings changes preserve tasks and the other settings", SettingsIsolation);
+            Run("Text scale snapshots, persistence and failed saves preserve committed task state", TextScalePreference);
             Run("Preview operations change only the isolated session", Preview);
             Run("Real isolated persistence survives restart and a locked-save failure", RealStoreRoundTrip);
             Run("Notes and priority preserve scheduling through edits, completion and restoration", DetailsLifecycle);
@@ -137,7 +138,11 @@ internal static class SessionTests
                 ? (variant == 1 ? "#ABCDEF" : "#123456") : "copy-" + variant + "-" + property.Name;
             else if (type == typeof(bool)) candidate = variant == 1;
             else if (type == typeof(DateTime)) candidate = Epoch.AddDays(variant).AddTicks(index * 31);
-            else if (type == typeof(double)) candidate = property.Name == "BackgroundTransparency" ? variant * 17.5 : 400.25 + index + variant;
+            else if (type == typeof(double)) {
+                if (property.Name == "BackgroundTransparency") candidate = variant * 17.5;
+                else if (property.Name == "TextScale") candidate = 1 + variant * 0.1;
+                else candidate = 400.25 + index + variant;
+            }
             else if (type == typeof(int)) candidate = 17 + variant + index;
             else if (type.IsEnum) {
                 Array choices = Enum.GetValues(type); candidate = choices.GetValue(choices.Length > 1 ? 1 : 0);
@@ -378,6 +383,60 @@ internal static class SessionTests
         session.SaveGeometry(111.25, 55.75, 490, 610);
         expected.Settings.Left = 111.25; expected.Settings.Top = 55.75; expected.Settings.Width = 490; expected.Settings.Height = 610;
         Equal(expected, session.Snapshot(), "Geometry changed tasks, timing or unrelated settings");
+    }
+
+    private static void TextScalePreference()
+    {
+        var writer = new RecordingStore();
+        TodoState supplied = Fixture(), expected = Fixture();
+        supplied.Settings.Appearance.TextScale = 1.1;
+        expected.Settings.Appearance.TextScale = 1.1;
+        var session = new TodoSession(writer, supplied, false, delegate { return Epoch; });
+        supplied.Settings.Appearance.TextScale = 1.5;
+        TodoState snapshot = session.Snapshot();
+        snapshot.Settings.Appearance.TextScale = 0.9;
+        Equal(expected, session.Snapshot(), "Text scale constructor or snapshot shared mutable state");
+
+        AppearanceSettings draft = session.Snapshot().Settings.Appearance;
+        draft.TextScale = 1.4;
+        writer.DuringSave = delegate(TodoState received) {
+            received.Settings.Appearance.TextScale = 0.9;
+            received.Items.Clear();
+            throw new IOException("fixture text scale save failure");
+        };
+        ExpectSaveFailure(delegate { session.SetAppearance(draft); });
+        Equal(expected, session.Snapshot(), "A failed text scale save partially committed appearance or tasks");
+        Assert(draft.TextScale == 1.4, "A failed save mutated the text scale draft.");
+        writer.DuringSave = null;
+        session.SetAppearance(draft);
+        expected.Settings.Appearance.TextScale = 1.4;
+        draft.TextScale = 1.2;
+        writer.Arguments.Last().Settings.Appearance.TextScale = 0.9;
+        Equal(expected, session.Snapshot(), "A successful scale save leaked its draft or writer argument");
+
+        var store = new TodoStore(Path.Combine(temporaryRoot, "text-scale-restart"));
+        store.Save(session.Snapshot());
+        var restarted = new TodoSession(store, store.Load(), false, delegate { return Epoch; });
+        Equal(expected, restarted.Snapshot(), "Restart changed text scale or task history");
+        byte[] saved = File.ReadAllBytes(store.DataFilePath);
+        draft = restarted.Snapshot().Settings.Appearance;
+        draft.TextScale = 1.5;
+        using (var locked = new FileStream(store.DataFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            ExpectSaveFailure(delegate { restarted.SetAppearance(draft); });
+        Equal(expected, restarted.Snapshot(), "Locked scale save changed committed memory");
+        Assert(saved.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Locked scale save replaced the previous file.");
+        restarted.SetAppearance(draft);
+        expected.Settings.Appearance.TextScale = 1.5;
+        Equal(expected, restarted.Snapshot(), "Text scale could not be retried after unlocking");
+        Equal(expected, new TodoSession(store, store.Load(), false, delegate { return Epoch; }).Snapshot(),
+            "A retried scale save lost data after restart");
+
+        draft = restarted.Snapshot().Settings.Appearance;
+        draft.TextScale = Double.NaN;
+        restarted.SetAppearance(draft);
+        expected.Settings.Appearance.TextScale = 1;
+        Equal(expected, restarted.Snapshot(), "Invalid scale normalization reset tasks or other preferences");
+        Assert(Double.IsNaN(draft.TextScale), "Text scale normalization modified its caller.");
     }
 
     private static void Preview()

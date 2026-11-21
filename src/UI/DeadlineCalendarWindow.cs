@@ -136,14 +136,14 @@ namespace CornerTodo
             Refresh(state, now);
         }
 
-        internal void Refresh(TodoState state, DateTime now)
+        internal void Refresh(TodoState state, DateTime now, AppearanceSettings preview = null)
         {
             if (state == null) throw new ArgumentNullException("state");
             this.state = state; this.now = now;
             // Keep the calendar above a floating panel when their bounds overlap.
             bool floating = state.Settings != null && state.Settings.AlwaysOnTop;
             if (Topmost != floating) Topmost = floating;
-            AppearanceSettings current = AppearanceSettings.Normalize(state.Settings == null ? null : state.Settings.Appearance);
+            AppearanceSettings current = AppearanceSettings.Normalize(preview ?? (state.Settings == null ? null : state.Settings.Appearance));
             if (appearance == null || !appearance.Matches(current)) ApplyPalette(current);
             Render();
         }
@@ -251,6 +251,8 @@ namespace CornerTodo
         private void Render()
         {
             var data = new DeadlineCalendarData(state, includeCompleted.IsChecked == true, now);
+            int weeks = cells.Count / 7;
+            calendar.MinHeight = 33 + 78 * Math.Max(1, palette.TextScale) * weeks;
             DateTime localToday = RecurringTasks.LocalDate(now);
             monthTitle.Text = month.ToString("yyyy年M月", Chinese);
             previous.IsEnabled = month != DateTime.MinValue.Date;
@@ -418,6 +420,8 @@ namespace CornerTodo
                 DateTime now, PanelPalette palette, Brush mutedBackground, Brush selectedBackground)
             {
                 int count = items == null ? 0 : items.Count;
+                dayNumber.FontSize = 14 * palette.TextScale;
+                late.FontSize = extra.FontSize = 10 * palette.TextScale;
                 int lateCount = count == 0 ? 0 : items.Count(item => TodoRules.IsOverdue(item, now));
                 Button.IsTabStop = tabStop;
                 Button.Background = selected ? selectedBackground : currentMonth ? Brushes.Transparent : mutedBackground;
@@ -431,6 +435,8 @@ namespace CornerTodo
                     if (index >= count) continue;
                     TodoItem item = items[index];
                     titles[index].Text = (item.Text ?? "").Replace('\r', ' ').Replace('\n', ' ');
+                    titles[index].FontSize = 11 * palette.TextScale;
+                    dots[index].FontSize = 8 * palette.TextScale;
                     titles[index].Foreground = item.IsCompleted ? palette.Muted : palette.Ink;
                     titles[index].TextDecorations = item.IsCompleted ? TextDecorations.Strikethrough : null;
                     dots[index].Foreground = TodoRules.IsOverdue(item, now) ? palette.Urgent : item.IsCompleted ? palette.Muted : palette.Accent;
@@ -493,6 +499,8 @@ namespace CornerTodo
                 AutomationProperties.SetAutomationId(edit, "CalendarEdit_" + item.Id);
                 AutomationProperties.SetName(edit, "编辑待办：" + item.Text);
                 title.Text = item.Text; title.Foreground = item.IsCompleted ? palette.Muted : palette.Ink;
+                title.FontSize = 14 * palette.TextScale;
+                caption.FontSize = 12 * palette.TextScale;
                 title.TextDecorations = item.IsCompleted ? TextDecorations.Strikethrough : null;
                 string deadline = "未设截止";
                 if (item.HasDeadline) {

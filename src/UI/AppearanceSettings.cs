@@ -5,12 +5,16 @@ namespace CornerTodo
     // Stored independently from WPF so loading data never depends on UI resources.
     public sealed class AppearanceSettings
     {
+        public const double MinTextScale = 0.9;
+        public const double MaxTextScale = 1.5;
+
         public AppearanceSettings()
         {
             BackgroundTransparency = 20;
             BackgroundColor = "#F4F9FB";
             PrimaryTextColor = "#193C50";
             SecondaryTextColor = "#537486";
+            TextScale = 1.0;
         }
 
         // 0 means an opaque background; 100 means a fully transparent background.
@@ -19,6 +23,7 @@ namespace CornerTodo
         public string BackgroundColor { get; set; }
         public string PrimaryTextColor { get; set; }
         public string SecondaryTextColor { get; set; }
+        public double TextScale { get; set; }
 
         public static AppearanceSettings CreateLight()
         {
@@ -46,7 +51,8 @@ namespace CornerTodo
         {
             return new AppearanceSettings {
                 BackgroundTransparency = BackgroundTransparency, BackgroundColor = BackgroundColor,
-                PrimaryTextColor = PrimaryTextColor, SecondaryTextColor = SecondaryTextColor
+                PrimaryTextColor = PrimaryTextColor, SecondaryTextColor = SecondaryTextColor,
+                TextScale = TextScale
             };
         }
 
@@ -62,6 +68,9 @@ namespace CornerTodo
             result.BackgroundColor = ColorOrDefault(value.BackgroundColor, result.BackgroundColor);
             result.PrimaryTextColor = ColorOrDefault(value.PrimaryTextColor, result.PrimaryTextColor);
             result.SecondaryTextColor = ColorOrDefault(value.SecondaryTextColor, result.SecondaryTextColor);
+            if (!Double.IsNaN(value.TextScale) && !Double.IsInfinity(value.TextScale)
+                && value.TextScale >= MinTextScale && value.TextScale <= MaxTextScale)
+                result.TextScale = value.TextScale;
             return result;
         }
 
@@ -73,7 +82,8 @@ namespace CornerTodo
             return Math.Abs(left.BackgroundTransparency - right.BackgroundTransparency) < 0.000000001
                 && left.BackgroundColor == right.BackgroundColor
                 && left.PrimaryTextColor == right.PrimaryTextColor
-                && left.SecondaryTextColor == right.SecondaryTextColor;
+                && left.SecondaryTextColor == right.SecondaryTextColor
+                && Math.Abs(left.TextScale - right.TextScale) < 0.000000001;
         }
 
         private static string ColorOrDefault(string value, string fallback)

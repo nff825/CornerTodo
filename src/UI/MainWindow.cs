@@ -285,7 +285,12 @@ namespace CornerTodo
             }; menu.Items.Add(showCompleted);
             menu.Items.Add(new Separator());
             var appearance = new MenuItem { Header = "外观设置…" }; appearance.Click += delegate { EditAppearance(); }; menu.Items.Add(appearance);
-            var readable = new MenuItem { Header = "恢复清晰浅色" }; readable.Click += delegate { TrySaveAppearance(AppearanceSettings.CreateLight()); }; menu.Items.Add(readable);
+            var readable = new MenuItem { Header = "恢复清晰浅色" };
+            readable.Click += delegate {
+                AppearanceSettings light = AppearanceSettings.CreateLight();
+                light.TextScale = AppearanceSettings.Normalize(state.Settings.Appearance).TextScale;
+                TrySaveAppearance(light);
+            }; menu.Items.Add(readable);
             menu.Items.Add(new Separator());
             var display = new MenuItem { Header = "显示方式", Tag = "display-mode" };
             var desktopMode = new MenuItem { Header = "仅在桌面显示（默认）", IsCheckable = true,
@@ -401,7 +406,7 @@ namespace CornerTodo
 
         private void RefreshDeadlineCalendar(DateTime now)
         {
-            if (deadlineCalendar != null) deadlineCalendar.Refresh(state, now);
+            if (deadlineCalendar != null) deadlineCalendar.Refresh(state, now, appearancePreview);
         }
 
         private void EditTask(TodoItem item, bool focusNotes, Window parent = null)

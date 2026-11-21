@@ -114,6 +114,7 @@ namespace CornerTodo
     // Per-panel brushes; editor/menu styles remain independent and fully opaque.
     internal sealed class PanelPalette
     {
+        public readonly double TextScale;
         public readonly SolidColorBrush Background;
         public readonly SolidColorBrush Ink;
         public readonly SolidColorBrush Muted;
@@ -132,6 +133,7 @@ namespace CornerTodo
         public PanelPalette(AppearanceSettings appearance)
         {
             AppearanceSettings value = AppearanceSettings.Normalize(appearance);
+            TextScale = value.TextScale;
             Color backgroundColor = (Color)ColorConverter.ConvertFromString(value.BackgroundColor);
             byte alpha = (byte)Math.Round(255 * (1 - value.BackgroundTransparency / 100.0), MidpointRounding.AwayFromZero);
             Background = Frozen(Color.FromArgb(alpha, backgroundColor.R, backgroundColor.G, backgroundColor.B));

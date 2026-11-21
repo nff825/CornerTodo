@@ -31,6 +31,8 @@ namespace CornerTodo
         private readonly Dictionary<string, PresetControl> presets = new Dictionary<string, PresetControl>();
         private readonly Slider transparency;
         private readonly TextBlock transparencyValue;
+        private readonly Slider textScale;
+        private readonly TextBlock textScaleValue;
         private readonly TextBlock error;
         private AppearanceSettings current;
         private bool updating;
@@ -93,6 +95,54 @@ namespace CornerTodo
             AddPreset(presetGrid, 2, "original", "原版通透");
             body.Children.Add(presetGrid);
 
+            Grid textSizeGrid = new Grid();
+            textSizeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            textSizeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            textSizeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            textSizeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            textSizeGrid.ColumnDefinitions.Add(new ColumnDefinition());
+            textSizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            textSizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            TextBlock textSizeLabel = Text("文字大小", 14, Ink);
+            textSizeLabel.FontWeight = FontWeights.SemiBold;
+            textSizeLabel.VerticalAlignment = VerticalAlignment.Center;
+            textSizeGrid.Children.Add(textSizeLabel);
+            textScaleValue = Text("", 14, Ink);
+            textScaleValue.FontWeight = FontWeights.SemiBold;
+            textScaleValue.VerticalAlignment = VerticalAlignment.Center;
+            textScaleValue.Margin = new Thickness(10, 0, 12, 0);
+            AutomationProperties.SetName(textScaleValue, "文字大小数值");
+            Grid.SetColumn(textScaleValue, 1); textSizeGrid.Children.Add(textScaleValue);
+            Button resetTextSize = Button("恢复100%", "恢复100%", false);
+            resetTextSize.MinWidth = 0; resetTextSize.Padding = new Thickness(9, 5, 9, 5);
+            resetTextSize.Click += delegate {
+                updating = true;
+                try { textScale.Value = 100; }
+                finally { updating = false; }
+                ReadAndPreview();
+            };
+            Grid.SetColumn(resetTextSize, 2); textSizeGrid.Children.Add(resetTextSize);
+            textScale = new Slider { Minimum = 90, Maximum = 150, SmallChange = 1, LargeChange = 10,
+                TickFrequency = 5, IsSnapToTickEnabled = false, Height = 28, Margin = new Thickness(0, 7, 0, 0) };
+            AutomationProperties.SetName(textScale, "文字大小");
+            AutomationProperties.SetHelpText(textScale, "90% 到 150%，默认100%；事项文字与日期随比例调整。");
+            textScale.ValueChanged += delegate {
+                textScaleValue.Text = FormatTransparency(textScale.Value);
+                if (!updating) ReadAndPreview();
+            };
+            Grid.SetColumnSpan(textScale, 3); Grid.SetRow(textScale, 1); textSizeGrid.Children.Add(textScale);
+            Grid textSizeEndpoints = new Grid();
+            textSizeEndpoints.Children.Add(Text("90%", 11, Muted));
+            TextBlock largeTextEnd = Text("150%", 11, Muted);
+            largeTextEnd.HorizontalAlignment = HorizontalAlignment.Right;
+            textSizeEndpoints.Children.Add(largeTextEnd);
+            Grid.SetColumnSpan(textSizeEndpoints, 3); Grid.SetRow(textSizeEndpoints, 2); textSizeGrid.Children.Add(textSizeEndpoints);
+            TextBlock textSizeHint = Text("事项文字与日期随比例调整", 12, Muted);
+            textSizeHint.Margin = new Thickness(0, 6, 0, 0);
+            Grid.SetColumnSpan(textSizeHint, 3); Grid.SetRow(textSizeHint, 3); textSizeGrid.Children.Add(textSizeHint);
+            body.Children.Add(new Border { Child = textSizeGrid, BorderBrush = Outline, BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6), Padding = new Thickness(13, 11, 13, 10), Margin = new Thickness(0, 15, 0, 0) });
+
             Grid transparencyGrid = new Grid { Margin = new Thickness(0, 22, 0, 19) };
             transparencyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
             transparencyGrid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -147,7 +197,7 @@ namespace CornerTodo
             reset.HorizontalAlignment = HorizontalAlignment.Left;
             reset.Background = Brushes.Transparent; reset.BorderThickness = new Thickness(0);
             reset.Padding = new Thickness(0, 7, 10, 7); reset.Foreground = Accent;
-            reset.Click += delegate { SelectPreset("light"); };
+            reset.Click += delegate { ApplyAppearance(AppearanceSettings.CreateLight(), true); };
             Grid.SetRow(reset, 1); footer.Children.Add(reset);
             StackPanel actions = new StackPanel { Orientation = Orientation.Horizontal };
             Button cancel = Button("取消", "取消外观设置", false);
@@ -164,13 +214,16 @@ namespace CornerTodo
 
         internal void SelectPreset(string preset)
         {
+            AppearanceSettings selected;
             if (String.Equals(preset, "light", StringComparison.OrdinalIgnoreCase) || preset == "清晰浅色")
-                ApplyAppearance(AppearanceSettings.CreateLight(), true);
+                selected = AppearanceSettings.CreateLight();
             else if (String.Equals(preset, "dark", StringComparison.OrdinalIgnoreCase) || preset == "清晰深色")
-                ApplyAppearance(AppearanceSettings.CreateDark(), true);
+                selected = AppearanceSettings.CreateDark();
             else if (String.Equals(preset, "original", StringComparison.OrdinalIgnoreCase) || preset == "原版通透")
-                ApplyAppearance(AppearanceSettings.CreateOriginal(), true);
+                selected = AppearanceSettings.CreateOriginal();
             else throw new ArgumentException("Unknown appearance preset.", "preset");
+            selected.TextScale = current.TextScale;
+            ApplyAppearance(selected, true);
         }
 
         internal bool TrySetColor(string role, string hex)
@@ -289,6 +342,7 @@ namespace CornerTodo
         {
             candidate = current.Clone();
             candidate.BackgroundTransparency = transparency.Value;
+            candidate.TextScale = textScale.Value / 100.0;
             string firstError = null;
             foreach (ColorControl control in colorControls)
             {
@@ -316,6 +370,8 @@ namespace CornerTodo
             {
                 transparency.Value = current.BackgroundTransparency;
                 transparencyValue.Text = FormatTransparency(current.BackgroundTransparency);
+                textScale.Value = current.TextScale * 100;
+                textScaleValue.Text = FormatTransparency(current.TextScale * 100);
                 foreach (ColorControl control in colorControls)
                 {
                     string color = GetColor(current, control.Role);
@@ -335,6 +391,7 @@ namespace CornerTodo
             {
                 AppearanceSettings preset = pair.Key == "light" ? AppearanceSettings.CreateLight() :
                     pair.Key == "dark" ? AppearanceSettings.CreateDark() : AppearanceSettings.CreateOriginal();
+                preset.TextScale = current.TextScale;
                 bool selected = current.Matches(preset);
                 pair.Value.Button.BorderBrush = selected ? Accent : Outline;
                 pair.Value.Button.BorderThickness = new Thickness(selected ? 2 : 1);

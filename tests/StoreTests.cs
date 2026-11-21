@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Web.Script.Serialization;
 using CornerTodo;
 
 internal static class StoreTests
@@ -53,6 +54,8 @@ internal static class StoreTests
             Run("Saving invalid appearance normalizes only the affected fields", InvalidAppearanceSave);
             Run("Opaque and fully transparent background endpoints survive restart", AppearanceTransparencyEndpoints);
             Run("Cloning and normalization isolate live appearance from draft edits", AppearanceCloneIsolation);
+            Run("Optional text scale defaults independently and accepts supported saved values", TextScaleReadCompatibility);
+            Run("Text scale saves with existing data version and repairs invalid fields independently", TextScalePersistence);
             Run("Version-one files load optional task fields without rewriting or losing data", TaskDetailsMigration);
             Run("Notes, priority and sort preference survive restart and clearing notes", TaskDetailsRoundTrip);
             Run("Invalid optional ranks fall back and malformed note content is preserved for recovery", TaskDetailsReadPolicy);
@@ -814,6 +817,94 @@ internal static class StoreTests
         AppearanceSettings fresh = AppearanceSettings.CreateLight();
         light.BackgroundColor = "#000000";
         Assert(fresh.BackgroundColor == "#F4F9FB", "Factory or normalization returns a shared preset object.");
+    }
+
+    private static void TextScaleReadCompatibility()
+    {
+        Assert(new AppearanceSettings().TextScale == 1 && AppearanceSettings.CreateLight().TextScale == 1 &&
+            AppearanceSettings.CreateDark().TextScale == 1 && AppearanceSettings.CreateOriginal().TextScale == 1,
+            "An appearance preset does not use the standard text scale.");
+        for (int version = 1; version <= TodoState.CurrentVersion; version++) {
+            string[] settings = { null, "{}", "{\"Appearance\":{\"BackgroundColor\":\"#ABCDEF\"}}" };
+            for (int index = 0; index < settings.Length; index++) {
+                TodoStore store = Store("text-scale-legacy-" + version + "-" + index);
+                Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+                string json = AppearanceDocument(settings[index]).Replace("\"Version\":1", "\"Version\":" + version);
+                File.WriteAllText(store.DataFilePath, json, Encoding.UTF8);
+                byte[] saved = File.ReadAllBytes(store.DataFilePath);
+                TodoState loaded = store.Load();
+                AssertAppearanceTask(loaded);
+                Assert(loaded.Settings.Appearance.TextScale == 1 && store.LoadWarning == null &&
+                    saved.SequenceEqual(File.ReadAllBytes(store.DataFilePath)), "Loading a missing scale rewrote or recovered valid legacy data.");
+                if (index == 2) Assert(loaded.Settings.Appearance.BackgroundColor == "#ABCDEF", "A missing scale reset another appearance preference.");
+            }
+        }
+
+        string[] fields = { "0.9", "1", "1.2345", "1.5", "null", "\"1.2\"", "false", "{}", "[]", "0", "0.8999", "1.5001", "1e308" };
+        double[] expected = { 0.9, 1, 1.2345, 1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        for (int index = 0; index < fields.Length; index++) {
+            TodoStore store = Store("text-scale-fields-" + index);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+            string json = AppearanceDocument("{\"Appearance\":{\"TextScale\":" + fields[index] +
+                ",\"BackgroundTransparency\":37,\"BackgroundColor\":\"#ABCDEF\",\"PrimaryTextColor\":\"#123456\",\"SecondaryTextColor\":\"#345678\"}}");
+            File.WriteAllText(store.DataFilePath, json, Encoding.UTF8);
+            byte[] saved = File.ReadAllBytes(store.DataFilePath);
+            TodoState loaded = store.Load();
+            AssertAppearanceTask(loaded);
+            AppearanceSettings appearance = loaded.Settings.Appearance;
+            Assert(appearance.TextScale == expected[index] && appearance.BackgroundTransparency == 37 &&
+                appearance.BackgroundColor == "#ABCDEF" && appearance.PrimaryTextColor == "#123456" &&
+                appearance.SecondaryTextColor == "#345678", "Text scale parsing reset another appearance field or accepted an unsupported value.");
+            Assert(store.LoadWarning == null && saved.SequenceEqual(File.ReadAllBytes(store.DataFilePath)) &&
+                Directory.GetFiles(Path.GetDirectoryName(store.DataFilePath), "*.corrupt-*").Length == 0,
+                "An optional text scale damaged, recovered or rewrote valid tasks.");
+        }
+    }
+
+    private static void TextScalePersistence()
+    {
+        TodoStore store = Store("text-scale-persistence");
+        Directory.CreateDirectory(Path.GetDirectoryName(store.DataFilePath));
+        File.WriteAllText(store.DataFilePath, AppearanceDocument("{\"Appearance\":{\"BackgroundColor\":\"#ABCDEF\"}}"), Encoding.UTF8);
+        TodoState state = store.Load();
+        foreach (double scale in new[] { 0.9, 1.0, 1.2345, 1.5 }) {
+            state.Settings.Appearance.TextScale = scale;
+            store.Save(state);
+            state = new TodoStore(Path.GetDirectoryName(store.DataFilePath)).Load();
+            AssertAppearanceTask(state);
+            Assert(TodoState.CurrentVersion == 4 && state.Version == 4 && state.Settings.Appearance.TextScale == scale &&
+                state.Settings.Appearance.BackgroundColor == "#ABCDEF", "Restart lost scale, palette or the existing data version.");
+            var json = (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(store.DataFilePath));
+            var settings = (IDictionary<string, object>)json["Settings"];
+            var appearance = (IDictionary<string, object>)settings["Appearance"];
+            Assert(appearance.ContainsKey("TextScale") && !settings.ContainsKey("TextScale"), "Text scale was not saved within Appearance.");
+        }
+
+        foreach (double invalid in new[] { Double.NaN, Double.NegativeInfinity, Double.PositiveInfinity, -1.0, 0.8999, 1.5001 }) {
+            state.Settings.Appearance.TextScale = invalid;
+            state.Settings.Appearance.BackgroundTransparency = 37;
+            store.Save(state);
+            TodoState loaded = store.Load();
+            AssertAppearanceTask(loaded);
+            Assert(loaded.Settings.Appearance.TextScale == 1 && loaded.Settings.Appearance.BackgroundColor == "#ABCDEF" &&
+                loaded.Settings.Appearance.BackgroundTransparency == 37 && store.LoadWarning == null,
+                "Invalid in-memory scale did not normalize independently before saving.");
+            Assert(state.Settings.Appearance.TextScale.Equals(invalid), "Save normalized the caller's appearance in place.");
+        }
+
+        AppearanceSettings original = AppearanceSettings.CreateDark();
+        original.TextScale = 1.4;
+        AppearanceSettings clone = original.Clone();
+        AppearanceSettings normalized = AppearanceSettings.Normalize(original);
+        Assert(clone.TextScale == 1.4 && normalized.TextScale == 1.4 && original.Matches(clone) &&
+            !Object.ReferenceEquals(original, clone) && !Object.ReferenceEquals(original, normalized),
+            "Cloning or normalization lost the supported scale or reused mutable state.");
+        clone.TextScale = 0.9;
+        normalized.TextScale = 1.5;
+        Assert(original.TextScale == 1.4 && !original.Matches(clone) && !original.Matches(normalized),
+            "Scale edits escaped the draft or were ignored by appearance matching.");
+        AppearanceSettings invalidColor = AppearanceSettings.Normalize(new AppearanceSettings { BackgroundColor = "bad", TextScale = 1.2 });
+        Assert(invalidColor.TextScale == 1.2 && invalidColor.BackgroundColor == "#F4F9FB", "Repairing a color discarded a valid scale.");
     }
 
     private static void TaskDetailsMigration()

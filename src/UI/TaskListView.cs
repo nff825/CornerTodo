@@ -86,13 +86,13 @@ namespace CornerTodo
             var titleLine = new Grid();
             titleLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             titleLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var text = Theme.Text(item.Text, overdue ? 21 : urgent ? 19 : 15, item.IsCompleted ? palette.Muted : palette.Ink);
+            var text = Theme.Text(item.Text, (overdue ? 21 : urgent ? 19 : 15) * palette.TextScale, item.IsCompleted ? palette.Muted : palette.Ink);
             if (overdue || urgent) text.FontWeight = FontWeights.SemiBold;
             if (item.IsCompleted) text.TextDecorations = TextDecorations.Strikethrough;
             titleLine.Children.Add(text);
             var details = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(7, 1, 0, 0) };
-            var priorityText = Theme.Text(TodoRules.PriorityLabel(item.Priority), 10,
+            var priorityText = Theme.Text(TodoRules.PriorityLabel(item.Priority), 10 * palette.TextScale,
                 item.Priority == TaskPriority.High && !item.IsCompleted ? palette.Ink : palette.Muted);
             if (item.Priority == TaskPriority.High && !item.IsCompleted) priorityText.FontWeight = FontWeights.SemiBold;
             var priority = new Border { Child = priorityText, CornerRadius = new CornerRadius(3),
@@ -131,7 +131,7 @@ namespace CornerTodo
                 details.Children.Add(note);
             }
             Grid.SetColumn(details, 1); titleLine.Children.Add(details); textArea.Children.Add(titleLine);
-            var due = Theme.Text(AttentionLabel(item, now), overdue || urgent ? 13 : 12, overdue ? palette.Warning : urgent ? palette.Urgent : palette.Muted);
+            var due = Theme.Text(AttentionLabel(item, now), (overdue || urgent ? 13 : 12) * palette.TextScale, overdue ? palette.Warning : urgent ? palette.Urgent : palette.Muted);
             due.Tag = "deadline";
             due.Margin = new Thickness(0, 4, 0, 0);
             textArea.Children.Add(due);
